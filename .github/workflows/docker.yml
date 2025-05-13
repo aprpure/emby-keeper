@@ -6,10 +6,11 @@ on:
     types: [released]
 
 env:
-  REGISTRY_IMAGE: embykeeper/embykeeper
-
+  REGISTRY: ghcr.io  # 使用 GitHub Container Registry
+  REGISTRY_IMAGE: ${{ github.repository }}  
 permissions:
   contents: read
+  packages: write  # 增加对 GitHub Packages 的写入权限以推送镜像
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -36,7 +37,13 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ env.REGISTRY_IMAGE }}
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+          flavor: |
+            latest=true  # 允许使用 latest 标签
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
@@ -47,13 +54,14 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=false
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=false
           cache-to: type=gha,mode=max
-      - name: Login to Docker Hub
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ env.REGISTRY }}  # 指定登录到 GHCR
+          username: ${{ github.actor }}  # 使用 GitHub 用户名
+          password: ${{ secrets.GITHUB_TOKEN }}  # 使用 GitHub Token 作为密码
       - name: Push by digest
         id: build
         uses: docker/build-push-action@v5
@@ -61,7 +69,7 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha
       - name: Export digest
         run: |
@@ -94,17 +102,24 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ env.REGISTRY_IMAGE }}
-      - name: Login to Docker Hub
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+          flavor: |
+            latest=true  # 允许使用 latest 标签
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+            $(printf '${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
