@@ -1,6 +1,6 @@
 import asyncio
 import random
-from typing import List, Dict, Set, Optional
+from typing import List, Dict, Set, Optional, Iterable
 from urllib.parse import parse_qs, urlparse
 from datetime import datetime
 
@@ -259,6 +259,42 @@ class EmbyManager:
                         if not await emby.login():
                             emby.log.warning(f"保活失败: 无法登陆.")
                             return account, False
+                    
+                    # 检查是否设置了 play_id  
+                    if account.play_id:  
+                        try:  
+                            emby.log.info(f"尝试使用配置的 play_id: {account.play_id}")  
+                            item = await emby.get_item(account.play_id)  
+                            if item:  
+                                # 确认是视频类型  
+                                if item.get("MediaType", None) == "Video":  
+                                    emby.log.info(f'使用配置的 play_id 播放视频: "{truncate_str(item.get("Name", "(未命名视频)"), 10)}"')  
+                                    
+                                    # 计算播放时间  
+                                    try:  
+                                        if isinstance(account.time, Iterable):  
+                                            req_time = random.uniform(*account.time)  
+                                        else:  
+                                            req_time = account.time  
+                                    except TypeError:  
+                                        emby.log.warning(f"无法解析 time 配置, 请检查配置: {account.time} (应该为数字或两个数字的数组).")  
+                                        return account, False  
+                                        
+                                    # 播放视频  
+                                    try:  
+                                        await emby.play(item, time=req_time)  
+                                        emby.log.bind(log=True).info(f"使用 play_id 保活成功.")  
+                                        return account, True  
+                                    except EmbyError as e:  
+                                        emby.log.warning(f"使用 play_id 播放失败: {e}，将尝试随机视频")  
+                                else:  
+                                    emby.log.warning(f"配置的 play_id 不是视频类型，将使用随机视频")  
+                            else:  
+                                emby.log.warning(f"无法找到配置的 play_id: {account.play_id}，将使用随机视频")  
+                        except Exception as e:  
+                            emby.log.warning(f"使用 play_id 时发生错误: {e}，将使用随机视频")  
+                    
+                    # 如果没有设置 play_id 或者 play_id 播放失败，则使用原有的随机视频播放 
                     await emby.load_main_page()
                     if not emby.items:
                         emby.log.warning("保活失败: 无法获取首页中的视频项目")
