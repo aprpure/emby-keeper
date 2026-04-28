@@ -172,28 +172,49 @@ class ClientsSession:
             return False
 
     async def test_time(self):
-        url = "https://ip.ddnspod.com/timestamp"
+        """检测系统时间是否与世界时间同步, 失败时自动尝试多个备用时间源."""
+
+        def _parse_ddnspod(resp):
+            return int(resp.content.decode()) / 1000
+
+        def _parse_worldtimeapi(resp):
+            return resp.json()["unixtime"]
+
+        def _parse_timeapi(resp):
+            d = resp.json()
+            return datetime(
+                d["year"], d["month"], d["day"],
+                d["hour"], d["minute"], d["seconds"],
+                tzinfo=timezone.utc,
+            ).timestamp()
+
+        time_sources = [
+            {"name": "ddnspod", "url": "https://ip.ddnspod.com/timestamp", "parse": _parse_ddnspod},
+            {"name": "worldtimeapi", "url": "https://worldtimeapi.org/api/ip", "parse": _parse_worldtimeapi},
+            {"name": "timeapi", "url": "https://timeapi.io/api/time/current/ip", "parse": _parse_timeapi},
+        ]
         proxy_str = get_proxy_str(self.proxy)
-        try:
-            async with httpx.AsyncClient(http2=True, proxy=proxy_str) as client:
-                resp = await client.get(url)
-                if resp.status_code == 200:
-                    timestamp = int(resp.content.decode())
-                else:
-                    logger.warning(f"世界时间接口异常, 系统时间检测将跳过, 敬请注意. 程序将继续运行.")
-                    return False
-                nowtime = datetime.now(timezone.utc).timestamp()
-                if abs(nowtime - timestamp / 1000) > 30:
-                    logger.warning(
-                        f"您的系统时间设置不正确, 与世界时间差距过大, 可能会导致连接失败, 敬请注意. 程序将继续运行."
-                    )
-        except httpx.HTTPError:
-            logger.warning(f"检测世界时间发生错误, 时间检测将被跳过.")
-            return False
-        except Exception as e:
-            logger.warning(f"检测世界时间发生错误, 时间检测将被跳过.")
-            show_exception(e)
-            return False
+        last_err = None
+        async with httpx.AsyncClient(http2=True, proxy=proxy_str, timeout=10) as client:
+            for source in time_sources:
+                try:
+                    resp = await client.get(source["url"])
+                    if resp.status_code == 200:
+                        timestamp = source["parse"](resp)
+                        nowtime = datetime.now(timezone.utc).timestamp()
+                        if abs(nowtime - timestamp) > 30:
+                            logger.warning(
+                                f"您的系统时间设置不正确, 与世界时间差距过大, 可能会导致连接失败, 敬请注意. 程序将继续运行."
+                            )
+                        return True
+                    else:
+                        logger.debug(f"时间源 {source['name']} 返回异常状态码 {resp.status_code}, 尝试下一个.")
+                except Exception as e:
+                    logger.debug(f"时间源 {source['name']} 请求失败: {e}")
+                    last_err = e
+                    continue
+        logger.warning(f"所有时间源均不可用, 系统时间检测将跳过. (最后错误: {last_err})")
+        return False
 
     async def get_session_str_from_telethon(self, account: TelegramAccount):
         from telethon import TelegramClient
