@@ -412,6 +412,7 @@ class ClientsSession:
                         cache.set(session_str_key, session_str)
                         client.disconnect_handler = self._disconnect_handler
                         client.connect_handler = self._connect_handler
+                        client._skip_auth = getattr(account, "skip_auth", False)
                         logger.debug(f'登录账号 "{phone_masked}": "{client.me.full_name}" 成功.')
                         return client
                 except ApiIdPublishedFlood:

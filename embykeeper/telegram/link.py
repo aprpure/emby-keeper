@@ -226,6 +226,10 @@ class Link:
 
     async def auth(self, service: str, log_func=None):
         """向机器人发送授权请求."""
+        if getattr(self.client, "_skip_auth", False):
+            logger.debug(f"已跳过服务 {service.upper()} 认证 (skip_auth 已启用).")
+            return True
+
         async with authed_services_lock:
             user_auth_cache = authed_services.get(self.client.me.id, {}).get(service, None)
             if user_auth_cache is not None:

@@ -198,6 +198,10 @@ class TelegramAccount(ConfigModel):
     api_hash: Optional[str] = None
     session: Optional[str] = None
     enabled: Optional[bool] = True
+    skip_auth: Optional[bool] = Field(
+        False,
+        description="跳过 Telegram 机器人服务认证 (当认证机器人不可用时设为 true)",
+    )
 
     # 账号单独配置
     site: Optional[SiteConfig] = None
