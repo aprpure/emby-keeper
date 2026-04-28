@@ -35,7 +35,10 @@ class TelegramStream(io.TextIOWrapper):
             message = await self.queue.get()
             if self._disabled:
                 # 冷却期后自动恢复
-                if self._disabled_time and (asyncio.get_event_loop().time() - self._disabled_time) > self.COOLDOWN_SECONDS:
+                if (
+                    self._disabled_time
+                    and (asyncio.get_event_loop().time() - self._disabled_time) > self.COOLDOWN_SECONDS
+                ):
                     self._disabled = False
                     self._consecutive_failures = 0
                     logger.debug("Telegram 推送冷却期结束, 恢复推送.")

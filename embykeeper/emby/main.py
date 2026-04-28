@@ -17,7 +17,6 @@ from embykeeper.utils import AsyncTaskPool
 
 from .api import Emby, EmbyPlayError, EmbyConnectError, EmbyRequestError, EmbyError
 
-
 logger = logger.bind(scheme="embywatcher")
 
 

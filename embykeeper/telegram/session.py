@@ -183,8 +183,12 @@ class ClientsSession:
         def _parse_timeapi(resp):
             d = resp.json()
             return datetime(
-                d["year"], d["month"], d["day"],
-                d["hour"], d["minute"], d["seconds"],
+                d["year"],
+                d["month"],
+                d["day"],
+                d["hour"],
+                d["minute"],
+                d["seconds"],
                 tzinfo=timezone.utc,
             ).timestamp()
 
@@ -208,7 +212,9 @@ class ClientsSession:
                             )
                         return True
                     else:
-                        logger.debug(f"时间源 {source['name']} 返回异常状态码 {resp.status_code}, 尝试下一个.")
+                        logger.debug(
+                            f"时间源 {source['name']} 返回异常状态码 {resp.status_code}, 尝试下一个."
+                        )
                 except Exception as e:
                     logger.debug(f"时间源 {source['name']} 请求失败: {e}")
                     last_err = e
