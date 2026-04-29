@@ -173,6 +173,12 @@ async def main(
         rich_help_panel="模块开关",
         help="快速反复尝试注册指定机器人 (Embyboss)",
     ),
+    registrar_click_delay: str = typer.Option(
+        None,
+        "--rclick",
+        rich_help_panel="注册参数",
+        help="点击注册按钮前的延迟 (秒), 格式: 最小值-最大值 或 单个值",
+    ),
     version: bool = typer.Option(
         None,
         "--version",
@@ -506,7 +512,24 @@ async def main(
         if registrar or registrar_bot:
             from .telegram.registrar_main import RegisterManager
 
-            register_man = RegisterManager()
+            # 解析 click_delay: 命令行 > 配置文件 > 默认值
+            default_click_delay = config.registrar.click_delay if config.registrar else [0.05, 0.1]
+
+            if registrar_click_delay is not None:
+                try:
+                    if "-" in registrar_click_delay:
+                        parts = registrar_click_delay.split("-")
+                        click_delay = (float(parts[0]), float(parts[1]))
+                    else:
+                        val = float(registrar_click_delay)
+                        click_delay = (val, val)
+                except ValueError:
+                    logger.error(f"无效的 --rclick 参数格式: {registrar_click_delay}")
+                    raise typer.Exit(1)
+            else:
+                click_delay = tuple(default_click_delay)
+
+            register_man = RegisterManager(click_delay=click_delay)
 
         emby_man = None
         if emby:

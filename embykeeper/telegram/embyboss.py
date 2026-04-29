@@ -16,17 +16,19 @@ if TYPE_CHECKING:
 
 
 class EmbybossRegister:
-    def __init__(self, client: Client, logger: Logger, username: str, password: str):
+    def __init__(self, client: Client, logger: Logger, username: str, password: str,
+                 click_delay=(0.05, 0.1)):
         self.client = client
         self.log = logger
         self.username = username
         self.password = password
+        self.click_delay = click_delay
 
     async def run(self, bot: str):
         """单次注册尝试"""
         return await self._register_once(bot)
 
-    async def run_continuous(self, bot: str, interval_seconds: int = 1):
+    async def run_continuous(self, bot: str, interval_seconds: float = 1):
         try:
             panel = await self.client.wait_reply(bot, "/start")
         except asyncio.TimeoutError:
@@ -110,7 +112,7 @@ class EmbybossRegister:
             self.log.warning("找不到创建账户按钮, 无法注册.")
             return False
 
-        await asyncio.sleep(random.uniform(0.5, 1.5))
+        await asyncio.sleep(random.uniform(*self.click_delay))
 
         async with self.client.catch_reply(panel.chat.id) as f:
             try:

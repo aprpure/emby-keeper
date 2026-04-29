@@ -27,7 +27,8 @@ logger = logger.bind(scheme="teleregistrar")
 class RegisterManager:
     """注册管理器"""
 
-    def __init__(self):
+    def __init__(self, click_delay=(0.05, 0.1)):
+        self._click_delay = click_delay
         self._tasks: Dict[str, asyncio.Task] = {}  # phone -> task
         self._schedulers: Dict[str, Scheduler] = {}  # phone -> scheduler
         self._pool = AsyncTaskPool()
@@ -579,6 +580,7 @@ class RegisterManager:
                     logger=log,
                     username=client.me.username or f"user_{client.me.id}",
                     password="".join(random.choices(string.ascii_letters + string.digits, k=4)),
+                    click_delay=self._click_delay,
                 )
 
                 task = asyncio.create_task(embyboss_register.run_continuous(bot_username, 1))
