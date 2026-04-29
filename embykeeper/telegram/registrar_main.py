@@ -27,8 +27,9 @@ logger = logger.bind(scheme="teleregistrar")
 class RegisterManager:
     """注册管理器"""
 
-    def __init__(self, click_delay=(0.05, 0.1)):
+    def __init__(self, click_delay=(0.05, 0.1), username=None):
         self._click_delay = click_delay
+        self._username = username
         self._tasks: Dict[str, asyncio.Task] = {}  # phone -> task
         self._schedulers: Dict[str, Scheduler] = {}  # phone -> scheduler
         self._pool = AsyncTaskPool()
@@ -578,7 +579,7 @@ class RegisterManager:
                 embyboss_register = EmbybossRegister(
                     client=client,
                     logger=log,
-                    username=client.me.username or f"user_{client.me.id}",
+                    username=self._username or client.me.username or f"user_{client.me.id}",
                     password="".join(random.choices(string.ascii_letters + string.digits, k=4)),
                     click_delay=self._click_delay,
                 )

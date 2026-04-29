@@ -90,7 +90,7 @@ class MessagerConfig(ConfigModel):
 
 class RegistrarConfig(ConfigModel):
     concurrency: Optional[int] = 1
-    click_delay: Optional[List[float]] = [0.05, 0.1]
+    click_delay: Optional[List[float]] = [0.5, 1.5]
 
     model_config = {"extra": "allow"}
 

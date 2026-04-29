@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 class EmbybossRegister:
     def __init__(self, client: Client, logger: Logger, username: str, password: str,
-                 click_delay=(0.05, 0.1)):
+                 click_delay=(0.5, 1.5)):
         self.client = client
         self.log = logger
         self.username = username

@@ -179,6 +179,12 @@ async def main(
         rich_help_panel="注册参数",
         help="点击注册按钮前的延迟 (秒), 格式: 最小值-最大值 或 单个值",
     ),
+    registrar_username: str = typer.Option(
+        None,
+        "--rname",
+        rich_help_panel="注册参数",
+        help="自定义抢注用户名 (默认使用 Telegram 用户名)",
+    ),
     version: bool = typer.Option(
         None,
         "--version",
@@ -529,7 +535,7 @@ async def main(
             else:
                 click_delay = tuple(default_click_delay)
 
-            register_man = RegisterManager(click_delay=click_delay)
+            register_man = RegisterManager(click_delay=click_delay, username=registrar_username)
 
         emby_man = None
         if emby:
