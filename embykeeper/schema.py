@@ -231,6 +231,14 @@ class BotConfig(ConfigModel):
     token: str
 
 
+class LLMConfig(ConfigModel):
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    vision_model: Optional[str] = None
+    timeout: Optional[int] = 60
+
+
 class Config(ConfigModel):
     alias_map: ClassVar[Dict[str, str]] = {
         "emby.time_range": "watchtime",
@@ -262,6 +270,7 @@ class Config(ConfigModel):
     telegram: Optional[TelegramConfig] = TelegramConfig()
     notifier: Optional[NotifierConfig] = NotifierConfig()
     site: Optional[SiteConfig] = None
+    llm: Optional[LLMConfig] = None
 
     # 向后兼容字段
     time: Optional[str] = None

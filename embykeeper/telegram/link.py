@@ -14,6 +14,7 @@ from pyrogram.errors.exceptions.bad_request_400 import YouBlockedUser
 from pyrogram.errors import FloodWait
 
 from embykeeper.utils import async_partial, truncate_str
+from embykeeper import llm
 
 from .lock import super_ad_shown, super_ad_shown_lock, authed_services, authed_services_lock
 from .pyrogram import Client
@@ -334,15 +335,38 @@ class Link:
             return None, None
 
     async def gpt(self, prompt: str) -> Tuple[Optional[str], Optional[str]]:
-        """向机器人发送智能回答请求."""
+        """向机器人发送智能回答请求, 优先使用 LLM."""
+        answer = await llm.gpt(prompt)
+        if answer:
+            self.log.debug(f"LLM 智能回答成功.")
+            return answer, "llm"
         results = await self.post(f"/gpt {self.instance} {prompt}", timeout=40, name="请求智能回答")
         if results:
             return results.get("answer", None), results.get("by", None)
         else:
             return None, None
 
+    async def _download_photo(self, photo) -> Optional[bytes]:
+        """下载 Telegram 图片为字节数据."""
+        try:
+            if isinstance(photo, bytes):
+                return photo
+            bio = BytesIO()
+            await self.client.download_media(photo, file_name=bio)
+            bio.seek(0)
+            return bio.read()
+        except Exception as e:
+            self.log.debug(f"下载图片失败: {e}")
+            return None
+
     async def visual(self, photo, options: List[str], question=None) -> Tuple[Optional[str], Optional[str]]:
-        """向机器人发送视觉问题解答请求."""
+        """向机器人发送视觉问题解答请求, 优先使用 LLM."""
+        photo_bytes = await self._download_photo(photo)
+        if photo_bytes:
+            answer = await llm.visual(photo_bytes, options, question)
+            if answer:
+                self.log.debug(f"LLM 视觉识别成功: {answer}")
+                return answer, "llm"
         cmd = f"/visual {self.instance} {'/'.join(options)}"
         if question:
             cmd += f" {question}"
@@ -353,7 +377,13 @@ class Link:
             return None, None
 
     async def ocr(self, photo) -> Optional[str]:
-        """向机器人发送 OCR 解答请求."""
+        """向机器人发送 OCR 解答请求, 优先使用 LLM."""
+        photo_bytes = await self._download_photo(photo)
+        if photo_bytes:
+            answer = await llm.ocr(photo_bytes)
+            if answer:
+                self.log.debug(f"LLM OCR 识别成功: {answer}")
+                return answer
         cmd = f"/ocr {self.instance}"
         results = await self.post(cmd, photo=photo, timeout=20, name="请求验证码解答")
         if results:

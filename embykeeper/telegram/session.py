@@ -2,6 +2,7 @@ import asyncio
 import base64
 import binascii
 import pickle
+import socket
 import struct
 import tempfile
 import glob
@@ -132,7 +133,7 @@ class ClientsSession:
             var.exit_handlers.append(self.__class__.shutdown)
 
     @property
-    def basedir(self):
+    def basedir(self) -> Path:
         return Path(self._basedir) if self._basedir else config.basedir
 
     @property
@@ -172,54 +173,35 @@ class ClientsSession:
             return False
 
     async def test_time(self):
-        """检测系统时间是否与世界时间同步, 失败时自动尝试多个备用时间源."""
+        """通过 NTP 协议检测系统时间是否与世界时间同步."""
 
-        def _parse_ddnspod(resp):
-            return int(resp.content.decode()) / 1000
+        def _query_ntp(server, timeout=5):
+            """通过 NTP 协议直接查询时间, 无需 HTTP/TLS."""
+            NTP_DELTA = 2208988800  # 1900-01-01 到 1970-01-01 的秒数
+            msg = b"\x1b" + 47 * b"\0"
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.settimeout(timeout)
+                s.sendto(msg, (server, 123))
+                resp = s.recvfrom(1024)[0]
+            return struct.unpack("!12I", resp)[10] - NTP_DELTA + struct.unpack("!12I", resp)[11] / 2**32
 
-        def _parse_worldtimeapi(resp):
-            return resp.json()["unixtime"]
-
-        def _parse_timeapi(resp):
-            d = resp.json()
-            return datetime(
-                d["year"],
-                d["month"],
-                d["day"],
-                d["hour"],
-                d["minute"],
-                d["seconds"],
-                tzinfo=timezone.utc,
-            ).timestamp()
-
-        time_sources = [
-            {"name": "ddnspod", "url": "https://ip.ddnspod.com/timestamp", "parse": _parse_ddnspod},
-            {"name": "worldtimeapi", "url": "https://worldtimeapi.org/api/ip", "parse": _parse_worldtimeapi},
-            {"name": "timeapi", "url": "https://timeapi.io/api/time/current/ip", "parse": _parse_timeapi},
-        ]
-        proxy_str = get_proxy_str(self.proxy)
+        ntp_servers = ["pool.ntp.org", "ntp.aliyun.com", "time.google.com"]
         last_err = None
-        async with httpx.AsyncClient(http2=True, proxy=proxy_str, timeout=10) as client:
-            for source in time_sources:
-                try:
-                    resp = await client.get(source["url"])
-                    if resp.status_code == 200:
-                        timestamp = source["parse"](resp)
-                        nowtime = datetime.now(timezone.utc).timestamp()
-                        if abs(nowtime - timestamp) > 30:
-                            logger.warning(
-                                f"您的系统时间设置不正确, 与世界时间差距过大, 可能会导致连接失败, 敬请注意. 程序将继续运行."
-                            )
-                        return True
-                    else:
-                        logger.debug(
-                            f"时间源 {source['name']} 返回异常状态码 {resp.status_code}, 尝试下一个."
-                        )
-                except Exception as e:
-                    logger.debug(f"时间源 {source['name']} 请求失败: {e}")
-                    last_err = e
-                    continue
-        logger.warning(f"所有时间源均不可用, 系统时间检测将跳过. (最后错误: {last_err})")
+        for server in ntp_servers:
+            try:
+                timestamp = await asyncio.get_event_loop().run_in_executor(None, _query_ntp, server)
+                nowtime = datetime.now(timezone.utc).timestamp()
+                if abs(nowtime - timestamp) > 30:
+                    logger.warning(
+                        "您的系统时间设置不正确, 与世界时间差距过大, 可能会导致连接失败, 敬请注意. 程序将继续运行."
+                    )
+                return True
+            except Exception as e:
+                err_msg = str(e) or type(e).__name__
+                logger.debug(f"NTP 时间源 {server} 请求失败: {err_msg}")
+                last_err = e
+                continue
+        logger.warning(f"所有 NTP 时间源均不可用, 系统时间检测将跳过. (最后错误: {last_err})")
         return False
 
     async def get_session_str_from_telethon(self, account: TelegramAccount):
@@ -310,6 +292,8 @@ class ClientsSession:
         logger.bind(username=client.me.full_name).debug("已连接到 Telegram 服务器.")
 
     async def login(self, account: TelegramAccount, use_telethon=True):
+        phone_masked = ""
+        session_str_key = ""
         try:
             self.basedir.mkdir(parents=True, exist_ok=True)
             phone_masked = TelegramAccount.get_phone_masked(account.phone)
@@ -394,6 +378,7 @@ class ClientsSession:
                 }
 
                 try:
+                    client = None
                     client = Client(**client_params)
                     try:
                         await client.start()
@@ -429,7 +414,8 @@ class ClientsSession:
                         logger.error(f'账号 "{phone_masked}" 新生成的会话凭据无法被客户端使用, 登录失败.')
                         show_exception(e)
                         return None
-                    await client.storage.delete()
+                    if client:
+                        await client.storage.delete()
                     if session_str_src == "session":
                         logger.error(f'账号 "{phone_masked}" 由于配置中提供的 session 已被注销, 将被跳过.')
                         show_exception(e)
