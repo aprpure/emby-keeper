@@ -58,6 +58,9 @@ class LocalLink:
         return self.mode != "local"
 
     def supports_service(self, service: str) -> bool:
+        if service == "registrar":
+            return True
+
         cfg = self.cfg
         if not cfg:
             return False
