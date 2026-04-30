@@ -201,7 +201,7 @@ class TelegramAccount(ConfigModel):
     enabled: Optional[bool] = True
     skip_auth: Optional[bool] = Field(
         False,
-        description="跳过 Telegram 机器人服务认证 (当认证机器人不可用时设为 true)",
+        description="启用本地 LLM / helper 替代 @embykeeper_auth_bot, 不再使用远端认证机器人",
     )
 
     # 账号单独配置
@@ -233,11 +233,15 @@ class BotConfig(ConfigModel):
 
 
 class LLMConfig(ConfigModel):
+    mode: Optional[str] = Field("auto", pattern="^(auto|local|remote)$")
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     model: Optional[str] = None
     vision_model: Optional[str] = None
     timeout: Optional[int] = 60
+    helper_command: Optional[str] = None
+    helper_timeout: Optional[int] = 120
+    auth_services: Optional[List[str]] = None
 
 
 class Config(ConfigModel):

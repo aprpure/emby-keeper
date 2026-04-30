@@ -106,6 +106,9 @@ messager = false
 # 启用定时抢注功能, 默认禁用, 设置为 true 以启用:
 registrar = false
 
+# 设为 true 时, 不再使用 @embykeeper_auth_bot, 改为使用 llm 和本地 helper 替代远端能力:
+# skip_auth = true
+
 # 针对该账号的独特设置, 如需使用请将该段取消注释并修改. 详见 site 项和 checkiner 项.
 # [telegram.account.site]
 # checkiner = ["all"]
@@ -196,12 +199,14 @@ concurrency = 1
 
 # ================================================================================
 # LLM 大语言模型设置 (可选)
-# 用于视觉识别和智能回答, 作为 @embykeeper_auth_bot 的本地替代方案.
+# 仅当 telegram.account.skip_auth = true 时生效, 用于替代 @embykeeper_auth_bot.
 # 支持 OpenAI 兼容 API (OpenAI, DeepSeek, 本地模型等).
 # 详见: https://emby-keeper.github.io/guide/配置文件#llm-子项
 # ================================================================================
 
 # [llm]
+# 本地替代模式, auto = 自动使用已配置能力, local = 强制仅本地替代, remote = 保留字段语义供 helper 使用:
+# mode = "auto"
 # API Key:
 # api_key = "sk-xxx"
 # API 基础地址 (默认 OpenAI, 可改为其他兼容服务):
@@ -212,6 +217,10 @@ concurrency = 1
 # vision_model = "gpt-4o-mini"
 # 请求超时 (秒):
 # timeout = 60
+# 外部本地 helper 命令 (用于 captcha / wssocks / Telegram 推送等 LLM 不能直接完成的能力):
+# helper_command = "python local_helper.py"
+# helper 超时 (秒):
+# helper_timeout = 120
 
 # ================================================================================
 # 日志推送相关设置

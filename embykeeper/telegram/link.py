@@ -14,9 +14,9 @@ from pyrogram.errors.exceptions.bad_request_400 import YouBlockedUser
 from pyrogram.errors import FloodWait
 
 from embykeeper.utils import async_partial, truncate_str
-from embykeeper import llm
 
 from .lock import super_ad_shown, super_ad_shown_lock, authed_services, authed_services_lock
+from .link_local import LocalLink
 from .pyrogram import Client
 
 
@@ -33,6 +33,11 @@ class Link:
     def __init__(self, client: Client):
         self.client = client
         self.log = logger.bind(scheme="telelink", username=client.me.full_name)
+        self.local = LocalLink(client)
+
+    @property
+    def use_local_backend(self) -> bool:
+        return bool(getattr(self.client, "_skip_auth", False))
 
     @property
     def instance(self):
@@ -227,14 +232,17 @@ class Link:
 
     async def auth(self, service: str, log_func=None):
         """向机器人发送授权请求."""
-        if getattr(self.client, "_skip_auth", False):
-            logger.debug(f"已跳过服务 {service.upper()} 认证 (skip_auth 已启用).")
-            return True
-
         async with authed_services_lock:
             user_auth_cache = authed_services.get(self.client.me.id, {}).get(service, None)
             if user_auth_cache is not None:
                 return user_auth_cache
+
+            if self.use_local_backend:
+                result = await self.local.auth(service, log_func=log_func)
+                authed_services.setdefault(self.client.me.id, {})[service] = bool(result)
+                if result:
+                    logger.debug(f"已使用本地后端通过服务 {service.upper()} 认证 (skip_auth 已启用).")
+                return bool(result)
 
             # No cache, perform auth
             if not log_func:
@@ -272,6 +280,8 @@ class Link:
 
     async def captcha(self, site: str, url: str = None) -> Optional[str]:
         """向机器人发送验证码解析请求."""
+        if self.use_local_backend:
+            return await self.local.captcha(site, url)
         cmd = f"/captcha {self.instance} {site}"
         if url:
             cmd += f" {url}"
@@ -283,6 +293,8 @@ class Link:
 
     async def captcha_content(self, site: str, url: str = None) -> Optional[str]:
         """向机器人发送带验证码的远程网页解析请求."""
+        if self.use_local_backend:
+            return await self.local.captcha_content(site, url)
         cmd = f"/captcha {self.instance} {site}"
         if url:
             cmd += f" {url}"
@@ -294,6 +306,8 @@ class Link:
 
     async def wssocks(self) -> Tuple[Optional[str], Optional[str]]:
         """向机器人发送逆向 Socks 代理隧道监听请求."""
+        if self.use_local_backend:
+            return await self.local.wssocks()
         cmd = f"/wssocks {self.instance}"
         results = await self.post(cmd, timeout=20, name="请求新建代理隧道以跳过验证码")
         if results:
@@ -305,6 +319,8 @@ class Link:
         self, token: str, url: str, user_agent: Optional[str] = None
     ) -> Tuple[Optional[str], Optional[str]]:
         """向机器人发送通过代理隧道进行验证码解析请求."""
+        if self.use_local_backend:
+            return await self.local.captcha_wssocks(token, url, user_agent)
         cmd = f"/captcha_wssocks {self.instance} {token} {url}"
         if user_agent:
             cmd += f" {user_agent}"
@@ -316,6 +332,8 @@ class Link:
 
     async def pornemby_answer(self, question: str) -> Tuple[Optional[str], Optional[str]]:
         """向机器人发送问题回答请求."""
+        if self.use_local_backend:
+            return await self.local.pornemby_answer(question)
         results = await self.post(
             f"/pornemby_answer {self.instance} {question}", timeout=20, name="请求问题回答"
         )
@@ -326,6 +344,8 @@ class Link:
 
     async def terminus_answer(self, question: str) -> Tuple[Optional[str], Optional[str]]:
         """向机器人发送问题回答请求."""
+        if self.use_local_backend:
+            return await self.local.terminus_answer(question)
         results = await self.post(
             f"/terminus_answer {self.instance} {question}", timeout=20, name="请求问题回答"
         )
@@ -335,11 +355,9 @@ class Link:
             return None, None
 
     async def gpt(self, prompt: str) -> Tuple[Optional[str], Optional[str]]:
-        """向机器人发送智能回答请求, 优先使用 LLM."""
-        answer = await llm.gpt(prompt)
-        if answer:
-            self.log.debug(f"LLM 智能回答成功.")
-            return answer, "llm"
+        """向机器人发送智能回答请求."""
+        if self.use_local_backend:
+            return await self.local.gpt(prompt)
         results = await self.post(f"/gpt {self.instance} {prompt}", timeout=40, name="请求智能回答")
         if results:
             return results.get("answer", None), results.get("by", None)
@@ -360,13 +378,12 @@ class Link:
             return None
 
     async def visual(self, photo, options: List[str], question=None) -> Tuple[Optional[str], Optional[str]]:
-        """向机器人发送视觉问题解答请求, 优先使用 LLM."""
-        photo_bytes = await self._download_photo(photo)
-        if photo_bytes:
-            answer = await llm.visual(photo_bytes, options, question)
-            if answer:
-                self.log.debug(f"LLM 视觉识别成功: {answer}")
-                return answer, "llm"
+        """向机器人发送视觉问题解答请求."""
+        if self.use_local_backend:
+            photo_bytes = await self._download_photo(photo)
+            if photo_bytes:
+                return await self.local.visual(photo_bytes, options, question)
+            return None, None
         cmd = f"/visual {self.instance} {'/'.join(options)}"
         if question:
             cmd += f" {question}"
@@ -377,13 +394,12 @@ class Link:
             return None, None
 
     async def ocr(self, photo) -> Optional[str]:
-        """向机器人发送 OCR 解答请求, 优先使用 LLM."""
-        photo_bytes = await self._download_photo(photo)
-        if photo_bytes:
-            answer = await llm.ocr(photo_bytes)
-            if answer:
-                self.log.debug(f"LLM OCR 识别成功: {answer}")
-                return answer
+        """向机器人发送 OCR 解答请求."""
+        if self.use_local_backend:
+            photo_bytes = await self._download_photo(photo)
+            if photo_bytes:
+                return await self.local.ocr(photo_bytes)
+            return None
         cmd = f"/ocr {self.instance}"
         results = await self.post(cmd, photo=photo, timeout=20, name="请求验证码解答")
         if results:
@@ -393,16 +409,22 @@ class Link:
 
     async def send_log(self, message):
         """向机器人发送日志记录请求."""
+        if self.use_local_backend:
+            return await self.local.send_log(message)
         results = await self.post(f"/log {self.instance} {message}", name="发送日志到 Telegram ")
         return bool(results)
 
     async def send_msg(self, message):
         """向机器人发送即时日志记录请求."""
+        if self.use_local_backend:
+            return await self.local.send_msg(message)
         results = await self.post(f"/msg {self.instance} {message}", name="发送即时日志到 Telegram ")
         return bool(results)
 
     async def infer(self, prompt: str) -> Tuple[Optional[str], Optional[str]]:
         """向机器人发送话术推测记录请求."""
+        if self.use_local_backend:
+            return await self.local.infer(prompt)
         bio = BytesIO()
         bio.write(prompt.encode("utf-8"))
         bio.seek(0)
