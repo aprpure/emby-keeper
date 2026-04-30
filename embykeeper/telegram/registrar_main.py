@@ -37,30 +37,62 @@ class RegisterManager:
         config.on_list_change("telegram.account", self._handle_account_change)
         config.on_change("registrar", self._handle_config_change)
 
+    @staticmethod
+    def _task_name(task: asyncio.Task, default: str):
+        getter = getattr(task, "get_name", None)
+        if callable(getter):
+            return getter()
+        return default
+
+    @staticmethod
+    async def _wait_managed_task(task: asyncio.Task):
+        try:
+            return await task
+        except asyncio.CancelledError:
+            return None
+
+    def _scheduled_phones(self):
+        phones = set()
+        for stores in (self._schedulers, self._tasks):
+            for key in stores.keys():
+                if "." in key:
+                    phones.add(key.split(".", 1)[0])
+                else:
+                    phones.add(key)
+        return phones
+
+    def _register_account_schedule(self, account: TelegramAccount):
+        schedulers, tasks = self.schedule_account(account)
+        for scheduler in schedulers:
+            self._start_timed_scheduler(scheduler)
+        # interval/continuous tasks are created and stored in self._tasks inside schedule_account
+        for task in tasks:
+            self._observe_task(task)
+        return bool(schedulers or tasks)
+
+    def _start_timed_scheduler(self, scheduler: Scheduler):
+        scheduler_key = getattr(scheduler, "_register_key", None)
+        if not scheduler_key:
+            raise ValueError("scheduler missing register key")
+
+        task = asyncio.create_task(scheduler.schedule(), name=scheduler_key)
+        self._tasks[scheduler_key] = task
+        self._observe_task(task)
+        return task
+
+    def _observe_task(self, task: asyncio.Task):
+        task_name = self._task_name(task, "registrar.task")
+        self._pool.add(self._wait_managed_task(task), name=task_name)
+
     def _handle_config_change(self, *args):
         """Handle changes to the register configuration"""
-        # Stop all existing schedulers - collect phones first
-        phones = set()
-        for key in self._schedulers.keys():
-            if "." in key:
-                phone = key.split(".")[0]
-                phones.add(phone)
-
-        for phone in phones:
+        for phone in self._scheduled_phones():
             self.stop_account(phone)
 
         # Reschedule all accounts with the new configuration
         for account in config.telegram.account:
             if account.enabled and account.registrar:
-                schedulers = self.schedule_account(account)
-                if schedulers:
-                    if isinstance(schedulers, list):
-                        for scheduler in schedulers:
-                            if hasattr(scheduler, "schedule"):
-                                self._pool.add(scheduler.schedule())
-                    else:
-                        # 间隔注册返回的是task, 直接添加
-                        self._pool.add(schedulers)
+                self._register_account_schedule(account)
 
         logger.info("已根据新的配置重新安排所有注册任务.")
 
@@ -72,15 +104,7 @@ class RegisterManager:
 
         for account in added:
             if account.enabled and account.registrar:
-                schedulers = self.schedule_account(account)
-                if schedulers:
-                    if isinstance(schedulers, list):
-                        for scheduler in schedulers:
-                            if hasattr(scheduler, "schedule"):
-                                self._pool.add(scheduler.schedule())
-                    else:
-                        # 间隔注册返回的是task, 直接添加
-                        self._pool.add(schedulers)
+                if self._register_account_schedule(account):
                     logger.info(f"新增的 {account.phone} 账号的注册计划任务已增加.")
 
     def stop_account(self, phone: str):
@@ -121,8 +145,8 @@ class RegisterManager:
     def schedule_account(self, account: TelegramAccount) -> tuple[List[Scheduler], List[asyncio.Task]]:
         """为单个账户安排注册任务"""
         phone = account.phone
-        if phone in self._schedulers or phone in self._tasks:
-            self.stop_account(phone)
+        config_to_use = account.registrar_config or config.registrar
+        self.stop_account(phone)
 
         # 获取此账户启用的站点
         sites_to_register_names = self.get_sites_for_account(account)
@@ -142,15 +166,14 @@ class RegisterManager:
             else:
                 site_name = cls.__module__.rsplit(".", 1)[-1]
 
-            site_config = config.registrar.get_site_config(site_name)
+            site_config = config_to_use.get_site_config(site_name)
             if not site_config:
                 logger.warning(f"{account.phone} 账号的站点 {site_name} 未配置注册设置, 将跳过")
                 continue
 
             if site_config.get("times"):
                 # 定时模式
-                scheduler = self._schedule_site_timed(account, site_name, site_config)
-                schedulers.append(scheduler)
+                schedulers.extend(self._schedule_site_timed(account, site_name, site_config))
             elif site_config.get("interval_minutes"):
                 # 间隔模式
                 task = self._schedule_site_interval(account, site_name, site_config)
@@ -162,10 +185,12 @@ class RegisterManager:
         """定时注册模式"""
         phone_masked = TelegramAccount.get_phone_masked(account.phone)
         times = site_config.get("times", [])
+        if not times:
+            return []
 
-        # 将时间列表转换为时间范围格式
-        times_str = ",".join(times)
-        time_range = f"<{times_str}>"
+        scheduler_key = f"{account.phone}.{site_name}"
+        scheduler_ref = {}
+        time_range = times[0] if len(times) == 1 else f"<{','.join(times)}>"
 
         def on_next_time(t: datetime):
             logger.info(
@@ -179,10 +204,11 @@ class RegisterManager:
                 parent_ids=[account_ctx.id, date_ctx.id, site_ctx.id],
             )
 
-        def func(ctx: RunContext):
+        def func(ctx: RunContext, scheduler_ref=scheduler_ref):
             task = asyncio.create_task(self._run_single_site(ctx, account, site_name, site_config))
             log = logger.bind(username=f"@{site_name}", name=f"{phone_masked}")
-            log.info(f"已计划定时抢注任务, 下次运行: {scheduler.next_run.strftime('%Y-%m-%d %H:%M:%S')}")
+            scheduler = scheduler_ref["scheduler"]
+            log.info(f"已计划定时抢注任务, 下次运行: {scheduler.next_time.strftime('%Y-%m-%d %H:%M:%S')}")
             return task
 
         scheduler = Scheduler.from_str(
@@ -194,9 +220,10 @@ class RegisterManager:
             sid=f"registrar.timed.{account.phone}.{site_name}",
         )
 
-        scheduler_key = f"{account.phone}.{site_name}"
+        scheduler._register_key = scheduler_key
+        scheduler_ref["scheduler"] = scheduler
         self._schedulers[scheduler_key] = scheduler
-        return scheduler
+        return [scheduler]
 
     def _schedule_site_interval(self, account: TelegramAccount, site_name: str, site_config: dict):
         """间隔注册模式"""
@@ -205,11 +232,15 @@ class RegisterManager:
 
         if interval_minutes < 3:
             # 连续模式
-            task = asyncio.create_task(self._continuous_register_task(account, site_name, site_config))
+            task = asyncio.create_task(
+                self._continuous_register_task(account, site_name, site_config),
+                name=task_key,
+            )
         else:
             # 间隔模式
             task = asyncio.create_task(
-                self._interval_register_task(account, site_name, site_config, interval_minutes)
+                self._interval_register_task(account, site_name, site_config, interval_minutes),
+                name=task_key,
             )
 
         self._tasks[task_key] = task
@@ -259,66 +290,6 @@ class RegisterManager:
                     if task.cancel in client.stop_handlers:
                         client.stop_handlers.remove(task.cancel)
 
-    async def _interval_register_task(
-        self, account: TelegramAccount, site_name: str, site_config: dict, interval_minutes: int
-    ):
-        """间隔注册任务"""
-
-        async with ClientsSession([account]) as clients:
-            async for a, client in clients:
-                match = re.match(r"templ_a<(.+?)>", site_name)
-                bot_username = match.group(1) if match else site_name
-
-                log = logger.bind(name=f"{client.me.full_name}, @{bot_username}")
-
-                async def loop():
-                    while True:
-                        try:
-                            account_ctx = RunContext.get_or_create(f"registrar.account.{account.phone}")
-                            await RunContext.run(
-                                lambda c: self._run_single_site(c, account, site_name, site_config),
-                                description=f"{account.phone} 账号 {site_name} 站点间隔注册",
-                                parent_ids=[account_ctx.id],
-                            )
-                        except Exception as e:
-                            log.error(f"间隔注册任务异常: {e}")
-                            logger.exception("详细异常信息:")
-
-                        await asyncio.sleep(interval_minutes * 60)
-
-                task = asyncio.create_task(loop())
-                client.stop_handlers.append(task.cancel)
-                try:
-                    await task
-                finally:
-                    if task.cancel in client.stop_handlers:
-                        client.stop_handlers.remove(task.cancel)
-
-    async def _run_single_site(
-        self, ctx: RunContext, account: TelegramAccount, site_name: str, site_config: dict
-    ):
-        """运行单个站点的注册任务"""
-
-        async with ClientsSession([account]) as clients:
-            async for a, client in clients:
-                match = re.match(r"templ_a<(.+?)>", site_name)
-                bot_username = match.group(1) if match else site_name
-
-                log = logger.bind(name=f"{client.me.full_name}, @{bot_username}")
-
-                if not await Link(client).auth("registrar", log_func=log.error):
-                    log.error("账户权限验证失败.")
-                    return
-
-                clses = extract(get_cls("registrar", names=[site_name]))
-                if not clses:
-                    log.error(f"无法找到站点 {site_name} 的注册器")
-                    return
-
-                cls = clses[0]
-                registrar = cls(client=client, **site_config)
-                await registrar.start()
-
     async def schedule_all(self) -> tuple[List[Scheduler], List[asyncio.Task]]:
         """安排所有注册任务."""
         logger.debug(f"开始为所有账户安排注册任务, 总账户数: {len(config.telegram.account)}")
@@ -349,10 +320,12 @@ class RegisterManager:
 
         logger.info(f"已创建 {len(schedulers)} 个定时注册调度器和 {len(tasks)} 个间隔注册任务.")
 
-        awaitables = tasks + [s.schedule() for s in schedulers]
+        for scheduler in schedulers:
+            self._start_timed_scheduler(scheduler)
+        for task in tasks:
+            self._observe_task(task)
 
-        if awaitables:
-            await asyncio.gather(*awaitables)
+        await self._pool.wait()
 
     async def _interval_register_task(
         self, account: TelegramAccount, site_name: str, site_config: dict, interval_minutes: int
@@ -369,21 +342,19 @@ class RegisterManager:
                 async def loop():
                     while True:
                         try:
-                            account_ctx = RunContext.get_or_create(f"register.account.{account.phone}")
-                            site_ctx = RunContext.get_or_create(f"register.site.{site_name}")
-                            ctx = RunContext.prepare(
+                            account_ctx = RunContext.get_or_create(f"registrar.account.{account.phone}")
+                            site_ctx = RunContext.get_or_create(f"registrar.site.{site_name}")
+                            await RunContext.run(
+                                lambda c: self._run_single_site(c, account, site_name, site_config),
                                 description=f"{client.me.full_name} 账号 {site_name} 站点间隔注册",
                                 parent_ids=[account_ctx.id, site_ctx.id],
                             )
-
-                            await self._run_single_site(ctx, account, site_name, site_config)
-                            await asyncio.sleep(interval_minutes * 60)
-
                         except asyncio.CancelledError:
                             break
                         except Exception as e:
                             logger.error(f"{phone_masked} 账号 {site_name} 站点注册异常: {e}")
-                            await asyncio.sleep(interval_minutes * 60)
+
+                        await asyncio.sleep(interval_minutes * 60)
 
                 task = asyncio.create_task(loop())
                 client.stop_handlers.append(task.cancel)
@@ -413,7 +384,12 @@ class RegisterManager:
                 if not await Link(client).auth("registrar", log_func=log.error):
                     return
 
-                cls = get_cls("registrar", names=[site_name])[0]
+                clses = extract(get_cls("registrar", names=[site_name]))
+                if not clses:
+                    log.error(f"无法找到站点 {site_name} 的注册器")
+                    return
+
+                cls = clses[0]
 
                 register = cls(
                     client,

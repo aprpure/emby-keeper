@@ -24,7 +24,7 @@ class BaseBotRegister(ABC):
         context: RunContext = None,
         retries=None,
         timeout=None,
-        config: dict = {},
+        config=None,
     ):
         self.client = client
         self.ctx = context or RunContext.prepare()
@@ -32,19 +32,32 @@ class BaseBotRegister(ABC):
         self._retries = retries
         self._timeout = timeout
 
-        self.config = config
+        self.config = {} if config is None else config
         self.finished = asyncio.Event()  # 注册完成事件
         self.log = self.ctx.bind_logger(logger.bind(name=self.name, username=client.me.full_name))  # 日志组件
 
         self._task = None  # 主任务
 
+    @staticmethod
+    def _get_registrar_option(name: str, default):
+        registrar_config = getattr(config, "registrar", None)
+        if registrar_config is None:
+            return default
+        if isinstance(registrar_config, dict):
+            return registrar_config.get(name, default)
+        return getattr(registrar_config, name, default)
+
     @property
     def retries(self):
-        return self._retries or getattr(config, "register", {}).get("retries", 1)
+        if self._retries is not None:
+            return self._retries
+        return self._get_registrar_option("retries", 1)
 
     @property
     def timeout(self):
-        return self._timeout or getattr(config, "register", {}).get("timeout", 120)
+        if self._timeout is not None:
+            return self._timeout
+        return self._get_registrar_option("timeout", 120)
 
     async def _start(self):
         """注册器的入口函数的错误处理外壳."""
