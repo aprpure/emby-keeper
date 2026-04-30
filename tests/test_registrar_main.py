@@ -5,6 +5,7 @@ from enum import Enum, auto
 from types import SimpleNamespace
 import types
 
+
 def _install_test_stubs():
     loguru_module = types.ModuleType("loguru")
 
@@ -313,6 +314,7 @@ def test_handle_config_change_accepts_schedule_account_tuple():
     original_config = registrar_main_module.config
     registrar_main_module.config = fake_config
     try:
+
         async def scenario():
             manager = RegisterManager()
             manager._pool = RecordingPool()
@@ -358,6 +360,7 @@ def test_handle_account_change_accepts_schedule_account_tuple():
     original_config = registrar_main_module.config
     registrar_main_module.config = fake_config
     try:
+
         async def scenario():
             manager = RegisterManager()
             manager._pool = RecordingPool()

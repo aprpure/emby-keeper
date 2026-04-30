@@ -47,9 +47,7 @@ class EmbybossRegister:
         "正在为您初始化账户",
         "正在创建用户",
     )
-    registration_success_keywords = (
-        "创建用户成功",
-    )
+    registration_success_keywords = ("创建用户成功",)
     registration_failure_keywords = (
         "已有此账户名",
         "检查有无特殊字符",
@@ -234,11 +232,7 @@ class EmbybossRegister:
             current_status_match = re.search(r"当前状态 \| ([^\n]+)", text)
             register_status_match = re.search(r"注册状态 \| (True|False)", text)
             available_slots_match = re.search(r"可注册席位 \| (\d+)", text)
-            if (
-                current_status_match is None
-                or register_status_match is None
-                or available_slots_match is None
-            ):
+            if current_status_match is None or register_status_match is None or available_slots_match is None:
                 raise ValueError
 
             current_status = current_status_match.group(1).strip()

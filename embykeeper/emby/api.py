@@ -524,8 +524,8 @@ class Emby:
         media_sources = playback_info.get("MediaSources") or []
         primary_media_source = media_sources[0] if media_sources else {}
         media_source_id = primary_media_source.get("Id") or playback_info.get("MediaSourceId")
-        direct_stream_url = (
-            primary_media_source.get("DirectStreamUrl") or playback_info.get("DirectStreamUrl", None)
+        direct_stream_url = primary_media_source.get("DirectStreamUrl") or playback_info.get(
+            "DirectStreamUrl", None
         )
         if not media_source_id:
             raise EmbyPlayError("无可用媒体源, 无法开始播放.")
@@ -658,7 +658,9 @@ class Emby:
                     json=get_playing_data(0),
                 )
                 session_started = True
-                self.log.debug(f'播放会话已创建: "{truncate_str(iname, 10)}" ({play_session_id or "unknown"}).')
+                self.log.debug(
+                    f'播放会话已创建: "{truncate_str(iname, 10)}" ({play_session_id or "unknown"}).'
+                )
             except EmbyRequestError as e:
                 raise EmbyPlayError(f"无法开始播放: {e}")
             t = time
@@ -696,9 +698,7 @@ class Emby:
                     progress_updates += 1
                     last_position_tick = payload["PositionTicks"]
                     if progress_updates == 1 or progress_updates % 5 == 0:
-                        self.log.debug(
-                            f'已发送 {progress_updates} 次播放进度: "{truncate_str(iname, 10)}".'
-                        )
+                        self.log.debug(f'已发送 {progress_updates} 次播放进度: "{truncate_str(iname, 10)}".')
                 except Exception as e:
                     self.log.debug(f"播放状态设定错误: {e}")
                     progress_errors += 1

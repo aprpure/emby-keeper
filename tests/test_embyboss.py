@@ -75,7 +75,9 @@ class FakeLogger:
 
 
 class FakeClient:
-    def __init__(self, reply_message=None, wait_reply_result=None, wait_edit_result=None, catch_reply_results=None):
+    def __init__(
+        self, reply_message=None, wait_reply_result=None, wait_edit_result=None, catch_reply_results=None
+    ):
         self.reply_message = reply_message
         self.wait_reply_result = wait_reply_result
         self.wait_edit_result = wait_edit_result
@@ -166,7 +168,9 @@ def test_attempt_accepts_registration_alert_with_followup_message():
     client = FakeClient(
         catch_reply_results=[
             make_message(REGISTRATION_PROMPT),
-            make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
+            make_message(
+                "🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"
+            ),
         ],
         wait_edit_result=make_message("创建用户成功"),
     )
@@ -183,7 +187,9 @@ def test_attempt_accepts_open_alert_with_followup_message():
     client = FakeClient(
         catch_reply_results=[
             make_message(REGISTRATION_PROMPT),
-            make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
+            make_message(
+                "🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"
+            ),
         ],
         wait_edit_result=make_message("创建用户成功"),
     )
@@ -200,7 +206,9 @@ def test_attempt_accepts_verified_alert_with_followup_message():
     client = FakeClient(
         catch_reply_results=[
             make_message(REGISTRATION_PROMPT),
-            make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
+            make_message(
+                "🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"
+            ),
         ],
         wait_edit_result=make_message("创建用户成功"),
     )
@@ -243,7 +251,9 @@ def test_attempt_waits_for_queue_edits_until_success():
                 "🆗 会话结束，收到设置\n\n用户名：**purejam**  安全码：**1234** \n\n"
                 "__已进入注册队列，当前排队序号：2__\n请耐心等待，创建完成后我会在这里直接通知你。"
             ),
-            make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
+            make_message(
+                "🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"
+            ),
             make_message("**▎创建用户成功🎉**\n\n· 用户名称 | `purejam`"),
         ],
     )
@@ -326,7 +336,12 @@ def test_attempt_uses_callback_prompt_when_no_followup_message():
     embyboss_module.asyncio.wait_for = first_timeout_then_continue
     try:
         client = FakeClient(
-            catch_reply_results=[None, make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......")],
+            catch_reply_results=[
+                None,
+                make_message(
+                    "🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"
+                ),
+            ],
             wait_edit_result=make_message("创建用户成功"),
         )
         register = EmbybossRegister(cast(Any, client), FakeLogger(), "purejam", "1234", click_delay=(0, 0))

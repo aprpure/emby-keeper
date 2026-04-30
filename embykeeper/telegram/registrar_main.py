@@ -558,7 +558,8 @@ class RegisterManager:
                     client=client,
                     logger=log,
                     username=self._username or client.me.username or f"user_{client.me.id}",
-                    password=self._password or "".join(random.choices(string.ascii_letters + string.digits, k=4)),
+                    password=self._password
+                    or "".join(random.choices(string.ascii_letters + string.digits, k=4)),
                     click_delay=self._click_delay,
                 )
 

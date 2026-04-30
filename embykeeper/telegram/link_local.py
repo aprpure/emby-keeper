@@ -91,7 +91,9 @@ class LocalLink:
 
         if log_func:
             if not self.cfg:
-                log_func("初始化错误: 已启用 skip_auth = true, 但未配置 llm 或本地 helper, 无法替代 @embykeeper_auth_bot.")
+                log_func(
+                    "初始化错误: 已启用 skip_auth = true, 但未配置 llm 或本地 helper, 无法替代 @embykeeper_auth_bot."
+                )
             elif service == "captcha":
                 log_func("初始化错误: 已启用本地 LLM 模式, 但未配置 llm.helper_command 以处理验证码令牌请求.")
             elif service in {"gpt", "visual"}:
@@ -195,10 +197,7 @@ class LocalLink:
         return None, None
 
     async def pornemby_answer(self, question: str) -> Tuple[Optional[str], Optional[str]]:
-        prompt = (
-            "你正在回答单选题. 请只输出一个选项字母 A/B/C/D, 禁止输出解释或其他内容.\n\n"
-            f"{question}"
-        )
+        prompt = "你正在回答单选题. 请只输出一个选项字母 A/B/C/D, 禁止输出解释或其他内容.\n\n" f"{question}"
         answer, by = await self.gpt(prompt)
         if answer:
             match = re.search(r"\b([ABCD])\b", answer.upper())
@@ -217,7 +216,9 @@ class LocalLink:
                 return match.group(1), by
         return None, None
 
-    async def visual(self, photo_bytes: bytes, options: List[str], question=None) -> Tuple[Optional[str], Optional[str]]:
+    async def visual(
+        self, photo_bytes: bytes, options: List[str], question=None
+    ) -> Tuple[Optional[str], Optional[str]]:
         if self.has_llm:
             answer = await llm.visual(photo_bytes, options, question)
             if answer:
