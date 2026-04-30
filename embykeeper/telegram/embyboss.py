@@ -117,10 +117,12 @@ class EmbybossRegister:
 
     async def _submit_credentials(self, chat_id: int):
         credential_text = f"{self.username} {self.password}"
-        deadline = asyncio.get_running_loop().time() + self.credential_reply_timeout
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.credential_reply_timeout
 
         while True:
-            remaining = deadline - asyncio.get_running_loop().time()
+            round_started_at = loop.time()
+            remaining = deadline - round_started_at
             if remaining <= 0:
                 self.log.warning("发送凭据后无响应, 无法注册.")
                 return False
@@ -140,12 +142,14 @@ class EmbybossRegister:
                 if result is not None:
                     return result
 
-            remaining = deadline - asyncio.get_running_loop().time()
+            remaining = deadline - loop.time()
             if remaining <= 0:
                 self.log.warning("发送凭据后无响应, 无法注册.")
                 return False
 
-            await asyncio.sleep(min(self.credential_resend_delay, remaining))
+            next_round_delay = max(0, self.credential_resend_delay - (loop.time() - round_started_at))
+            if next_round_delay > 0:
+                await asyncio.sleep(min(next_round_delay, remaining))
 
     async def _wait_registration_result(self, message: Message):
         current_message = message

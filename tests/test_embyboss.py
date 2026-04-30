@@ -82,6 +82,7 @@ class FakeClient:
         self.wait_reply_calls = []
         self.wait_edit_calls = []
         self.send_message_calls = []
+        self.send_message_times = []
         self.catch_reply_results = list(catch_reply_results or [])
 
     @asynccontextmanager
@@ -89,13 +90,16 @@ class FakeClient:
         future = asyncio.Future()
         if self.catch_reply_results:
             result = self.catch_reply_results.pop(0)
-            if result is not None:
+            if isinstance(result, DelayedReply):
+                result.schedule(future)
+            elif result is not None:
                 future.set_result(result)
         elif self.reply_message is not None:
             future.set_result(self.reply_message)
         yield future
 
     async def send_message(self, chat_id, text):
+        self.send_message_times.append(asyncio.get_running_loop().time())
         self.send_message_calls.append((chat_id, text))
 
     async def wait_reply(self, chat_id, send, timeout=10):
@@ -128,6 +132,21 @@ class FakePanel:
     async def click(self, button_text):
         self.click_calls.append(button_text)
         return self.answer
+
+
+class DelayedReply:
+    def __init__(self, delay: float, message):
+        self.delay = delay
+        self.message = message
+
+    def schedule(self, future):
+        loop = asyncio.get_running_loop()
+
+        def resolve():
+            if not future.done():
+                future.set_result(self.message)
+
+        loop.call_later(self.delay, resolve)
 
 
 def make_waiting_message(chat_id: int = 1000):
@@ -266,6 +285,29 @@ def test_attempt_resends_credential_bursts_until_queue_message_arrives():
 
     assert result is True
     assert client.send_message_calls == [(1000, "purejam 1234")] * 6
+
+
+def test_attempt_resends_credentials_on_three_second_round_cadence():
+    client = FakeClient(
+        catch_reply_results=[
+            make_message(REGISTRATION_PROMPT),
+            DelayedReply(0.08, make_message("still waiting for the real registration status")),
+            make_waiting_message(),
+        ],
+        wait_edit_result=make_message("创建用户成功"),
+    )
+    register = EmbybossRegister(cast(Any, client), FakeLogger(), "purejam", "1234", click_delay=(0, 0))
+    register.credential_reply_timeout = 1
+    register.credential_burst_reply_timeout = 0.2
+    register.credential_resend_delay = 0.15
+    panel = FakePanel(SimpleNamespace(message="🪙 开放注册中，免除资质核验。", alert=True))
+
+    result = asyncio.run(register._attempt_with_panel(panel))
+
+    assert result is True
+    assert client.send_message_calls == [(1000, "purejam 1234")] * 6
+    round_gap = client.send_message_times[3] - client.send_message_times[0]
+    assert 0.12 <= round_gap < 0.2
 
 
 def test_attempt_uses_callback_prompt_when_no_followup_message():
