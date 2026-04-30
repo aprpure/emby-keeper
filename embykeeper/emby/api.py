@@ -1,7 +1,7 @@
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime
 import random
-import string
 from urllib.parse import quote
 import uuid
 from typing import Iterable, List, Union, Optional
@@ -50,6 +50,19 @@ class EmbyEnv(BaseModel):
     device_id: str
     client_version: str
     useragent: str
+
+
+@dataclass
+class PlaySessionResult:
+    session_started: bool = False
+    progress_updates: int = 0
+    stop_reported: bool = False
+    last_position_ticks: int = 0
+    stop_endpoint: Optional[str] = None
+
+    @property
+    def is_successful(self) -> bool:
+        return self.session_started and self.progress_updates > 0 and self.stop_reported
 
 
 class Emby:
@@ -218,7 +231,8 @@ class Emby:
             "Version": self.env.client_version,
         }
         auth_header = ",".join([f"{k}={quote(str(v))}" for k, v in auth_headers.items()])
-        full_auth_header = f'MediaBrowser Token={self.token or ""},Emby UserId={self.run_id},{auth_header}'
+        emby_user_id = self.user_id or self.run_id
+        full_auth_header = f'MediaBrowser Token={self.token or ""},Emby UserId={emby_user_id},{auth_header}'
         headers["User-Agent"] = self.useragent or self.env.useragent
         headers["Accept-Language"] = "zh-CN,zh-Hans;q=0.9"
         headers["Content-Type"] = "application/json"
@@ -363,7 +377,7 @@ class Emby:
             cache.set(f"emby.credential.{self.hostname}.{self.a.username}", cache_data)
             return self.token
 
-    async def play(self, item: Union[dict, int], time: float = 10):
+    async def play(self, item: Union[dict, int], time: float = 10, total_ticks: Optional[int] = None):
         if isinstance(item, dict):
             try:
                 iid = item["Id"]
@@ -507,14 +521,14 @@ class Emby:
         playback_info = resp.json()
 
         play_session_id = playback_info.get("PlaySessionId", "")
-        if "MediaSources" in playback_info:
-            media_source_id = playback_info["MediaSources"][0]["Id"]
-            direct_stream_url = playback_info["MediaSources"][0].get("DirectStreamUrl", None)
-        else:
-            media_source_id = "".join(
-                random.choice(string.ascii_lowercase + string.digits) for _ in range(32)
-            )
-            direct_stream_url = None
+        media_sources = playback_info.get("MediaSources") or []
+        primary_media_source = media_sources[0] if media_sources else {}
+        media_source_id = primary_media_source.get("Id") or playback_info.get("MediaSourceId")
+        direct_stream_url = (
+            primary_media_source.get("DirectStreamUrl") or playback_info.get("DirectStreamUrl", None)
+        )
+        if not media_source_id:
+            raise EmbyPlayError("无可用媒体源, 无法开始播放.")
 
         await asyncio.sleep(random.uniform(1, 3))
 
@@ -542,7 +556,17 @@ class Emby:
                 json=playback_info_data,
             )
 
+        playback_start_ticks = int(datetime.now().timestamp() // 10 * 10 * 10000000)
+        max_position_ticks = int(total_ticks) if total_ticks and total_ticks > 0 else None
+
+        def normalize_tick(tick):
+            tick = max(0, int(tick))
+            if max_position_ticks is not None:
+                tick = min(tick, max_position_ticks)
+            return tick
+
         def get_playing_data(tick, update=False, stop=False):
+            tick = normalize_tick(tick)
             data = {
                 "SubtitleOffset": 0,
                 "MaxStreamingBitrate": 420000000,
@@ -550,7 +574,7 @@ class Emby:
                 "SubtitleStreamIndex": -1,
                 "VolumeLevel": 100,
                 "PlaybackRate": 1,
-                "PlaybackStartTimeTicks": int(datetime.now().timestamp() // 10 * 10 * 10000000),
+                "PlaybackStartTimeTicks": playback_start_ticks,
                 "PositionTicks": tick,
                 "PlaySessionId": play_session_id,
             }
@@ -576,7 +600,10 @@ class Emby:
             )
             return data
 
+        stream_started = False
+
         async def stream():
+            nonlocal stream_started
             url = direct_stream_url or f"/Videos/{iid}/stream"
             length = 0
             last_err_time = datetime.now()
@@ -593,6 +620,9 @@ class Emby:
                         "X-Playback-Session-Id": play_session_id,
                     },
                 )
+                if not stream_started:
+                    stream_started = True
+                    self.log.debug(f'已开始请求视频流: "{truncate_str(iname, 10)}".')
                 try:
                     async for i in resp.aiter_content(chunk_size=1024):
                         length += len(i)
@@ -616,6 +646,9 @@ class Emby:
         await asyncio.sleep(rt)
         self.log.info(f'开始发送视频 "{truncate_str(iname, 10)}" 发送进度.')
         Emby.playing_count += 1
+        session_started = False
+        progress_updates = 0
+        last_position_tick = 0
         try:
             await asyncio.sleep(random.uniform(1, 3))
             try:
@@ -624,6 +657,8 @@ class Emby:
                     path="/Sessions/Playing",
                     json=get_playing_data(0),
                 )
+                session_started = True
+                self.log.debug(f'播放会话已创建: "{truncate_str(iname, 10)}" ({play_session_id or "unknown"}).')
             except EmbyRequestError as e:
                 raise EmbyPlayError(f"无法开始播放: {e}")
             t = time
@@ -658,6 +693,12 @@ class Emby:
                         ),
                         10,
                     )
+                    progress_updates += 1
+                    last_position_tick = payload["PositionTicks"]
+                    if progress_updates == 1 or progress_updates % 5 == 0:
+                        self.log.debug(
+                            f'已发送 {progress_updates} 次播放进度: "{truncate_str(iname, 10)}".'
+                        )
                 except Exception as e:
                     self.log.debug(f"播放状态设定错误: {e}")
                     progress_errors += 1
@@ -674,15 +715,31 @@ class Emby:
                 show_exception(e)
 
         try:
-            final_percentage = random.uniform(0.95, 1.0)
-            final_tick = int((time * final_percentage) // 10 * 10 * 10000000)
-            await self._request(
-                method="POST",
-                path="/Sessions/Playing/Progress",
-                json=get_playing_data(final_tick, stop=True),
-            )
+            final_tick = last_position_tick or normalize_tick(time * 10000000)
+            stop_payload = get_playing_data(final_tick, stop=True)
+            stop_endpoint = "/Sessions/Playing/Stopped"
+            try:
+                await self._request(
+                    method="POST",
+                    path=stop_endpoint,
+                    json=stop_payload,
+                )
+            except Exception as stop_error:
+                self.log.debug(f"播放停止上报失败, 正在尝试兼容性回退: {stop_error}")
+                stop_endpoint = "/Sessions/Playing/Progress"
+                await self._request(
+                    method="POST",
+                    path=stop_endpoint,
+                    json=stop_payload,
+                )
             self.log.info(f"播放完成, 共 {time:.0f} 秒.")
-            return True
+            return PlaySessionResult(
+                session_started=session_started,
+                progress_updates=progress_updates,
+                stop_reported=True,
+                last_position_ticks=stop_payload["PositionTicks"],
+                stop_endpoint=stop_endpoint,
+            )
         except Exception as e:
             raise EmbyPlayError(f"由于连接错误或服务器错误无法停止播放: {e}")
 
@@ -862,6 +919,9 @@ class Emby:
         except TypeError:
             self.log.warning(f"无法解析 time 配置, 请检查配置: {self.a.time} (应该为数字或两个数字的数组).")
             return False
+        if req_time < 0:
+            self.log.info("当前账号配置为仅登录, 不执行播放保活.")
+            return True
         msg = " (允许播放多个)" if self.a.allow_multiple else ""
         msg = f"开始播放视频{msg}, 共需播放 {req_time:.0f} 秒."
         self.log.info(msg)
@@ -896,28 +956,45 @@ class Emby:
                         failed_reasons["no_length"] += 1
                         continue
                 total_time = total_ticks / 10000000
-                if req_time - played_time > total_time:
+                remaining_time = req_time - played_time
+                if remaining_time > total_time:
                     if not self.a.allow_multiple:
                         failed_reasons["short_length"] += 1
                         failed_items.append(iid)
                         continue
                     play_time = total_time
                 else:
-                    play_time = max(req_time - played_time, 10)
+                    play_time = remaining_time
+                play_time = min(play_time, total_time)
+                if play_time <= 0:
+                    failed_reasons["short_length"] += 1
+                    continue
                 name = truncate_str(item.get("Name", "(未命名视频)"), 10)
                 self.log.info(f'开始播放 "{name}" ({play_time:.0f} 秒).')
                 self.log.debug(f"视频 ID: {iid}.")
                 while True:
                     try:
-                        await self.play(item, time=play_time)
+                        play_result = await self.play(item, time=play_time, total_ticks=total_ticks)
+                        if not play_result.is_successful:
+                            raise EmbyPlayError("播放会话未完整建立或未完成进度回传")
                         await asyncio.sleep(random.random())
-                        item = await self.get_item(iid)
-                        play_count = item.get("UserData", {}).get("PlayCount", 0)
-                        if play_count < 1:
-                            raise EmbyPlayError("播放后播放数低于 1")
-                        self.log.info(f"[yellow]成功播放视频[/], 当前该视频播放 {play_count} 次.")
+                        play_count = None
+                        try:
+                            item = await self.get_item(iid)
+                            play_count = item.get("UserData", {}).get("PlayCount", None)
+                        except EmbyError as e:
+                            self.log.debug(f"播放完成后获取服务端播放信息失败: {e}")
+                        if play_count is None:
+                            self.log.info(
+                                f"[yellow]成功播放视频[/], 已完成会话建立与进度回传 (Stop={play_result.stop_endpoint})."
+                            )
+                        else:
+                            self.log.info(
+                                f"[yellow]成功播放视频[/], 已完成会话建立与进度回传, 当前服务端播放次数: {play_count}."
+                            )
                         played_videos += 1
                         played_time += play_time
+                        retry = 0
                         if played_time >= req_time - 1:
                             self.log.bind(log=True).info(f"保活成功, 共播放 {played_videos} 个视频.")
                             return True

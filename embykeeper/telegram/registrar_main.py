@@ -239,6 +239,7 @@ class RegisterManager:
                     logger=log,
                     username=client.me.username or f"user_{client.me.id}",
                     password="".join(random.choices(string.ascii_letters + string.digits, k=4)),
+                    click_delay=self._click_delay,
                 )
 
                 async def long_running_task():

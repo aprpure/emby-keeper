@@ -244,7 +244,7 @@ class EmbyManager:
             async with sem:
                 try:
                     emby = Emby(account)
-                except Exception:
+                except Exception as e:
                     logger.error(f"初始化失败: {e}")
                     show_exception(e, regular=False)
                     return account, False

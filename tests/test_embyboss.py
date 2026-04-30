@@ -75,19 +75,28 @@ class FakeLogger:
 
 
 class FakeClient:
-    def __init__(self, reply_message=None, wait_reply_result=None, wait_edit_result=None):
+    def __init__(self, reply_message=None, wait_reply_result=None, wait_edit_result=None, catch_reply_results=None):
         self.reply_message = reply_message
         self.wait_reply_result = wait_reply_result
         self.wait_edit_result = wait_edit_result
         self.wait_reply_calls = []
         self.wait_edit_calls = []
+        self.send_message_calls = []
+        self.catch_reply_results = list(catch_reply_results or [])
 
     @asynccontextmanager
     async def catch_reply(self, chat_id):
         future = asyncio.Future()
-        if self.reply_message is not None:
+        if self.catch_reply_results:
+            result = self.catch_reply_results.pop(0)
+            if result is not None:
+                future.set_result(result)
+        elif self.reply_message is not None:
             future.set_result(self.reply_message)
         yield future
+
+    async def send_message(self, chat_id, text):
+        self.send_message_calls.append((chat_id, text))
 
     async def wait_reply(self, chat_id, send, timeout=10):
         self.wait_reply_calls.append((chat_id, send, timeout))
@@ -121,10 +130,25 @@ class FakePanel:
         return self.answer
 
 
+def make_waiting_message(chat_id: int = 1000):
+    return make_message(
+        "🆗 会话结束，收到设置\n\n用户名：**purejam**  安全码：**1234** \n\n__正在加入注册队列__......",
+        chat_id=chat_id,
+    )
+
+
+def configure_fast_credential_retries(register):
+    register.credential_reply_timeout = 0.02
+    register.credential_burst_reply_timeout = 0.005
+    register.credential_resend_delay = 0
+
+
 def test_attempt_accepts_registration_alert_with_followup_message():
     client = FakeClient(
-        reply_message=make_message(REGISTRATION_PROMPT),
-        wait_reply_result=make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
+        catch_reply_results=[
+            make_message(REGISTRATION_PROMPT),
+            make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
+        ],
         wait_edit_result=make_message("创建用户成功"),
     )
     register = EmbybossRegister(cast(Any, client), FakeLogger(), "purejam", "1234", click_delay=(0, 0))
@@ -133,13 +157,15 @@ def test_attempt_accepts_registration_alert_with_followup_message():
     result = asyncio.run(register._attempt_with_panel(panel))
 
     assert result is True
-    assert client.wait_reply_calls == [(1000, "purejam 1234", 30)]
+    assert client.send_message_calls == [(1000, "purejam 1234")] * 3
 
 
 def test_attempt_accepts_open_alert_with_followup_message():
     client = FakeClient(
-        reply_message=make_message(REGISTRATION_PROMPT),
-        wait_reply_result=make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
+        catch_reply_results=[
+            make_message(REGISTRATION_PROMPT),
+            make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
+        ],
         wait_edit_result=make_message("创建用户成功"),
     )
     register = EmbybossRegister(cast(Any, client), FakeLogger(), "purejam", "1234", click_delay=(0, 0))
@@ -148,13 +174,15 @@ def test_attempt_accepts_open_alert_with_followup_message():
     result = asyncio.run(register._attempt_with_panel(panel))
 
     assert result is True
-    assert client.wait_reply_calls == [(1000, "purejam 1234", 30)]
+    assert client.send_message_calls == [(1000, "purejam 1234")] * 3
 
 
 def test_attempt_accepts_verified_alert_with_followup_message():
     client = FakeClient(
-        reply_message=make_message(REGISTRATION_PROMPT),
-        wait_reply_result=make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
+        catch_reply_results=[
+            make_message(REGISTRATION_PROMPT),
+            make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
+        ],
         wait_edit_result=make_message("创建用户成功"),
     )
     register = EmbybossRegister(cast(Any, client), FakeLogger(), "purejam", "1234", click_delay=(0, 0))
@@ -163,7 +191,7 @@ def test_attempt_accepts_verified_alert_with_followup_message():
     result = asyncio.run(register._attempt_with_panel(panel))
 
     assert result is True
-    assert client.wait_reply_calls == [(1000, "purejam 1234", 30)]
+    assert client.send_message_calls == [(1000, "purejam 1234")] * 3
 
 
 def test_attempt_stops_when_callback_explicitly_says_closed():
@@ -178,7 +206,7 @@ def test_attempt_stops_when_callback_explicitly_says_closed():
 
 
 def test_attempt_stops_when_reply_message_explicitly_says_closed():
-    client = FakeClient(reply_message=make_message("🤖 自助注册已关闭，等待开启或使用注册码注册。"))
+    client = FakeClient(catch_reply_results=[make_message("🤖 自助注册已关闭，等待开启或使用注册码注册。")])
     register = EmbybossRegister(cast(Any, client), FakeLogger(), "purejam", "1234", click_delay=(0, 0))
     panel = FakePanel(SimpleNamespace(message="", alert=False))
 
@@ -190,10 +218,7 @@ def test_attempt_stops_when_reply_message_explicitly_says_closed():
 
 def test_attempt_waits_for_queue_edits_until_success():
     client = FakeClient(
-        reply_message=make_message(REGISTRATION_PROMPT),
-        wait_reply_result=make_message(
-            "🆗 会话结束，收到设置\n\n用户名：**purejam**  安全码：**1234** \n\n__正在加入注册队列__......"
-        ),
+        catch_reply_results=[make_message(REGISTRATION_PROMPT), make_waiting_message()],
         wait_edit_result=[
             make_message(
                 "🆗 会话结束，收到设置\n\n用户名：**purejam**  安全码：**1234** \n\n"
@@ -210,14 +235,12 @@ def test_attempt_waits_for_queue_edits_until_success():
 
     assert result is True
     assert len(client.wait_edit_calls) == 3
+    assert client.send_message_calls == [(1000, "purejam 1234")] * 3
 
 
 def test_attempt_stops_when_queue_edit_reports_failure():
     client = FakeClient(
-        reply_message=make_message(REGISTRATION_PROMPT),
-        wait_reply_result=make_message(
-            "🆗 会话结束，收到设置\n\n用户名：**purejam**  安全码：**1234** \n\n__正在加入注册队列__......"
-        ),
+        catch_reply_results=[make_message(REGISTRATION_PROMPT), make_waiting_message()],
         wait_edit_result=make_message(
             "**- ❎ 已有此账户名，请重新输入注册\n- ❎ 或检查有无特殊字符\n- ❎ 或emby服务器连接不通，会话已结束！**"
         ),
@@ -230,18 +253,38 @@ def test_attempt_stops_when_queue_edit_reports_failure():
     assert result is False
 
 
+def test_attempt_resends_credential_bursts_until_queue_message_arrives():
+    client = FakeClient(
+        catch_reply_results=[make_message(REGISTRATION_PROMPT), None, make_waiting_message()],
+        wait_edit_result=make_message("创建用户成功"),
+    )
+    register = EmbybossRegister(cast(Any, client), FakeLogger(), "purejam", "1234", click_delay=(0, 0))
+    configure_fast_credential_retries(register)
+    panel = FakePanel(SimpleNamespace(message="🪙 开放注册中，免除资质核验。", alert=True))
+
+    result = asyncio.run(register._attempt_with_panel(panel))
+
+    assert result is True
+    assert client.send_message_calls == [(1000, "purejam 1234")] * 6
+
+
 def test_attempt_uses_callback_prompt_when_no_followup_message():
     import embykeeper.telegram.embyboss as embyboss_module
 
     original_wait_for = embyboss_module.asyncio.wait_for
+    call_count = 0
 
-    async def immediate_timeout(awaitable, timeout):
-        raise asyncio.TimeoutError
+    async def first_timeout_then_continue(awaitable, timeout):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise asyncio.TimeoutError
+        return await original_wait_for(awaitable, timeout)
 
-    embyboss_module.asyncio.wait_for = immediate_timeout
+    embyboss_module.asyncio.wait_for = first_timeout_then_continue
     try:
         client = FakeClient(
-            wait_reply_result=make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
+            catch_reply_results=[None, make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......")],
             wait_edit_result=make_message("创建用户成功"),
         )
         register = EmbybossRegister(cast(Any, client), FakeLogger(), "purejam", "1234", click_delay=(0, 0))
@@ -250,6 +293,6 @@ def test_attempt_uses_callback_prompt_when_no_followup_message():
         result = asyncio.run(register._attempt_with_panel(panel))
 
         assert result is True
-        assert client.wait_reply_calls == [(2468, "purejam 1234", 30)]
+        assert client.send_message_calls == [(2468, "purejam 1234")] * 3
     finally:
         embyboss_module.asyncio.wait_for = original_wait_for

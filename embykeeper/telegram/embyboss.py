@@ -17,6 +17,9 @@ if TYPE_CHECKING:
 
 class EmbybossRegister:
     credential_reply_timeout = 30
+    credential_burst_count = 3
+    credential_burst_reply_timeout = 3
+    credential_resend_delay = 3
     registration_result_timeout = 180
     registration_ready_keywords = (
         "开放注册中",
@@ -96,6 +99,53 @@ class EmbybossRegister:
     @classmethod
     def _is_registration_failure(cls, text: str):
         return any(keyword in text for keyword in cls.registration_failure_keywords)
+
+    async def _handle_credential_response(self, message: Message):
+        text = self._message_text(message)
+        if self._is_registration_success(text):
+            self.log.info("注册成功!")
+            return True
+        if self._is_registration_waiting(text):
+            return await self._wait_registration_result(message)
+        if self._is_registration_failure(text):
+            self.log.warning("发送凭据后注册失败.")
+            return False
+        if self._is_registration_closed(text):
+            self.log.warning("发送凭据后注册失败.")
+            return False
+        return None
+
+    async def _submit_credentials(self, chat_id: int):
+        credential_text = f"{self.username} {self.password}"
+        deadline = asyncio.get_running_loop().time() + self.credential_reply_timeout
+
+        while True:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                self.log.warning("发送凭据后无响应, 无法注册.")
+                return False
+
+            response_timeout = min(self.credential_burst_reply_timeout, remaining)
+            async with self.client.catch_reply(chat_id) as f:
+                for _ in range(self.credential_burst_count):
+                    await self.client.send_message(chat_id, credential_text)
+
+                try:
+                    msg: Message = await asyncio.wait_for(f, response_timeout)
+                except asyncio.TimeoutError:
+                    msg = None
+
+            if msg is not None:
+                result = await self._handle_credential_response(msg)
+                if result is not None:
+                    return result
+
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                self.log.warning("发送凭据后无响应, 无法注册.")
+                return False
+
+            await asyncio.sleep(min(self.credential_resend_delay, remaining))
 
     async def _wait_registration_result(self, message: Message):
         current_message = message
@@ -268,14 +318,4 @@ class EmbybossRegister:
                 self.log.warning("未能正常进入注册状态, 注册失败.")
                 return False
 
-        try:
-            msg = await self.client.wait_reply(
-                chat_id,
-                f"{self.username} {self.password}",
-                timeout=self.credential_reply_timeout,
-            )
-        except asyncio.TimeoutError:
-            self.log.warning("发送凭据后无响应, 无法注册.")
-            return False
-
-        return await self._wait_registration_result(msg)
+        return await self._submit_credentials(chat_id)
