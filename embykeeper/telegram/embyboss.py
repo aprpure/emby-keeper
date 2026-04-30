@@ -49,7 +49,7 @@ class EmbybossRegister:
     )
     registration_failure_keywords = (
         "已有此账户名",
-        "特殊字符",
+        "检查有无特殊字符",
         "服务器连接不通",
         "当前没有可用注册资格",
         "你已经有账户啦",

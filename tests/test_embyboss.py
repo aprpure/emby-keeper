@@ -51,6 +51,15 @@ def make_message(text: str, chat_id: int = 1000):
     return SimpleNamespace(text=text, caption=None, chat=SimpleNamespace(id=chat_id))
 
 
+REGISTRATION_PROMPT = (
+    "🤖注意：您已进入注册状态:\n\n"
+    "• 请在2min内输入 [用户名][空格][安全码]\n"
+    "• 举个例子🌰：苏苏 1234\n\n"
+    "• 用户名中不限制中/英文/emoji，🚫特殊字符\n"
+    "• 安全码为敏感操作时附加验证，请填入最熟悉的数字4~6位；退出请点 /cancel"
+)
+
+
 class FakeLogger:
     def __init__(self):
         self.records = []
@@ -113,9 +122,8 @@ class FakePanel:
 
 
 def test_attempt_accepts_registration_alert_with_followup_message():
-    prompt = "🤖注意：您已进入注册状态:\n\n• 请在2min内输入 [用户名][空格][安全码]"
     client = FakeClient(
-        reply_message=make_message(prompt),
+        reply_message=make_message(REGISTRATION_PROMPT),
         wait_reply_result=make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
         wait_edit_result=make_message("创建用户成功"),
     )
@@ -129,9 +137,8 @@ def test_attempt_accepts_registration_alert_with_followup_message():
 
 
 def test_attempt_accepts_open_alert_with_followup_message():
-    prompt = "🤖注意：您已进入注册状态:\n\n• 请在2min内输入 [用户名][空格][安全码]"
     client = FakeClient(
-        reply_message=make_message(prompt),
+        reply_message=make_message(REGISTRATION_PROMPT),
         wait_reply_result=make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
         wait_edit_result=make_message("创建用户成功"),
     )
@@ -145,9 +152,8 @@ def test_attempt_accepts_open_alert_with_followup_message():
 
 
 def test_attempt_accepts_verified_alert_with_followup_message():
-    prompt = "🤖注意：您已进入注册状态:\n\n• 请在2min内输入 [用户名][空格][安全码]"
     client = FakeClient(
-        reply_message=make_message(prompt),
+        reply_message=make_message(REGISTRATION_PROMPT),
         wait_reply_result=make_message("🆗 已进入处理\n\n用户名：**purejam**  安全码：**1234** \n\n__正在为您初始化账户，更新用户策略__......"),
         wait_edit_result=make_message("创建用户成功"),
     )
@@ -183,9 +189,8 @@ def test_attempt_stops_when_reply_message_explicitly_says_closed():
 
 
 def test_attempt_waits_for_queue_edits_until_success():
-    prompt = "🤖注意：您已进入注册状态:\n\n• 请在2min内输入 [用户名][空格][安全码]"
     client = FakeClient(
-        reply_message=make_message(prompt),
+        reply_message=make_message(REGISTRATION_PROMPT),
         wait_reply_result=make_message(
             "🆗 会话结束，收到设置\n\n用户名：**purejam**  安全码：**1234** \n\n__正在加入注册队列__......"
         ),
@@ -208,9 +213,8 @@ def test_attempt_waits_for_queue_edits_until_success():
 
 
 def test_attempt_stops_when_queue_edit_reports_failure():
-    prompt = "🤖注意：您已进入注册状态:\n\n• 请在2min内输入 [用户名][空格][安全码]"
     client = FakeClient(
-        reply_message=make_message(prompt),
+        reply_message=make_message(REGISTRATION_PROMPT),
         wait_reply_result=make_message(
             "🆗 会话结束，收到设置\n\n用户名：**purejam**  安全码：**1234** \n\n__正在加入注册队列__......"
         ),
