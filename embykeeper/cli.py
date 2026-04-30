@@ -185,6 +185,12 @@ async def main(
         rich_help_panel="注册参数",
         help="自定义抢注用户名 (默认使用 Telegram 用户名)",
     ),
+    registrar_code: str = typer.Option(
+        None,
+        "--rcode",
+        rich_help_panel="注册参数",
+        help="自定义抢注安全码 (默认随机 4 位字母数字)",
+    ),
     version: bool = typer.Option(
         None,
         "--version",
@@ -535,7 +541,11 @@ async def main(
             else:
                 click_delay = tuple(default_click_delay)
 
-            register_man = RegisterManager(click_delay=click_delay, username=registrar_username)
+            register_man = RegisterManager(
+                click_delay=click_delay,
+                username=registrar_username,
+                password=registrar_code,
+            )
 
         emby_man = None
         if emby:

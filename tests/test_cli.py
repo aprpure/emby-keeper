@@ -28,3 +28,10 @@ def test_create_config(in_temp_dir: Path):
     result = runner.invoke(app, ["--example-config"])
     assert "这是一个配置文件范例" in result.stdout
     assert result.exit_code == 0
+
+
+def test_help_includes_registrar_code_option():
+    result = runner.invoke(app, ["--help"])
+    assert "--rcode" in result.stdout
+    assert "自定义抢注安全码" in result.stdout
+    assert result.exit_code == 0
