@@ -563,7 +563,7 @@ class RegisterManager:
                     click_delay=self._click_delay,
                 )
 
-                task = asyncio.create_task(embyboss_register.run_continuous(bot_username, 1))
+                task = asyncio.create_task(embyboss_register.run_continuous(bot_username, 0))
                 client.stop_handlers.append(task.cancel)
                 try:
                     await task

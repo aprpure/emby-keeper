@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import random
 import re
 from typing import Optional, TYPE_CHECKING
 
+from pyrogram import filters
 from pyrogram.errors import MessageIdInvalid
+from pyrogram.handlers import MessageHandler
 from pyrogram.types import Message
 from pyrogram.raw.types.messages import BotCallbackAnswer
 
@@ -16,11 +19,25 @@ if TYPE_CHECKING:
 
 
 class EmbybossRegister:
+    # 阶段 1: 抢开注.
+    # 在同一张面板上持续点击“创建账户”, 直到收到进入注册状态的信号,
+    # 或者本轮窗口超时后立刻进入下一轮.
+    create_button_reply_timeout = 5
+    create_button_callback_timeout = 0.5
+    create_button_max_inflight = 5
+
+    # 阶段 2: 已进入注册状态.
+    # 连续发送“用户名 安全码”, 并在限定时间内等待机器人进入处理流程.
     credential_reply_timeout = 30
     credential_burst_count = 3
     credential_burst_reply_timeout = 3
     credential_resend_delay = 3
-    registration_result_timeout = 180
+
+    # 阶段 3: 已进入处理队列.
+    # 机器人已经开始创建账户, 此时等待最终成功或失败结果.
+    registration_result_timeout = 60
+
+    # 文案分类.
     registration_ready_keywords = (
         "开放注册中",
         "资质核验成功",
@@ -74,6 +91,41 @@ class EmbybossRegister:
             return ""
         return (message.text or message.caption or "").strip()
 
+    @staticmethod
+    def _preview_text(text: str, limit: int = 80):
+        text = re.sub(r"\s+", " ", (text or "")).strip()
+        if len(text) > limit:
+            return text[: limit - 3] + "..."
+        return text
+
+    @asynccontextmanager
+    async def _catch_reply_queue(self, chat_id: int):
+        queue = asyncio.Queue()
+
+        async def handler_func(client, message: Message):
+            queue.put_nowait(message)
+
+        handler = MessageHandler(handler_func, filters.chat(chat_id) & (~filters.outgoing))
+        await self.client.add_handler(handler, group=0)
+        try:
+            yield queue
+        finally:
+            try:
+                await self.client.remove_handler(handler, group=0)
+            except ValueError:
+                pass
+
+    @staticmethod
+    def _set_outcome(
+        outcome: asyncio.Future,
+        status: str,
+        chat_id: Optional[int] = None,
+        source: Optional[str] = None,
+        signal_text: Optional[str] = None,
+    ):
+        if not outcome.done():
+            outcome.set_result((status, chat_id, source, signal_text))
+
     @classmethod
     def _is_registration_prompt(cls, text: str):
         return any(keyword in text for keyword in cls.registration_prompt_keywords)
@@ -97,6 +149,96 @@ class EmbybossRegister:
     @classmethod
     def _is_registration_failure(cls, text: str):
         return any(keyword in text for keyword in cls.registration_failure_keywords)
+
+    async def _watch_registration_replies(
+        self,
+        replies: asyncio.Queue,
+        outcome: asyncio.Future,
+        deadline: float,
+        metrics: dict,
+    ):
+        while not outcome.done():
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return
+            try:
+                msg: Message = await asyncio.wait_for(replies.get(), timeout=remaining)
+            except asyncio.TimeoutError:
+                return
+
+            text = self._message_text(msg)
+            metrics["reply_messages"] += 1
+            if self._is_registration_prompt(text):
+                self._set_outcome(outcome, "prompt", msg.chat.id, "reply_prompt", text)
+                return
+            if self._is_registration_failure(text):
+                self._set_outcome(outcome, "failure", None, "reply_failure", text)
+                return
+
+    async def _spam_create_button(
+        self,
+        panel: Message,
+        create_button: str,
+        outcome: asyncio.Future,
+        deadline: float,
+        metrics: dict,
+    ):
+        window_clicks = 0
+        next_report_at = asyncio.get_running_loop().time() + 1
+        inflight_clicks = set()
+
+        async def click_once():
+            try:
+                answer: BotCallbackAnswer = await panel.click(
+                    create_button,
+                    timeout=min(self.create_button_callback_timeout, max(deadline - asyncio.get_running_loop().time(), 0.1)),
+                )
+            except (TimeoutError, MessageIdInvalid):
+                metrics["callback_timeouts"] += 1
+                return
+
+            answer_text = (getattr(answer, "message", None) or "").strip()
+            metrics["callback_answers"] += 1
+            if self._is_registration_prompt(answer_text):
+                self._set_outcome(outcome, "prompt", panel.chat.id, "callback_prompt", answer_text)
+            elif self._is_registration_failure(answer_text):
+                self._set_outcome(outcome, "failure", None, "callback_failure", answer_text)
+
+        try:
+            while not outcome.done():
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    return
+
+                inflight_clicks = {task for task in inflight_clicks if not task.done()}
+                if len(inflight_clicks) >= self.create_button_max_inflight:
+                    await asyncio.sleep(min(0.02, remaining))
+                    continue
+
+                await asyncio.sleep(min(random.uniform(*self.click_delay), remaining))
+                if outcome.done():
+                    return
+
+                metrics["clicks_total"] += 1
+                window_clicks += 1
+
+                task = asyncio.create_task(click_once())
+                inflight_clicks.add(task)
+
+                now = asyncio.get_running_loop().time()
+                if now >= next_report_at:
+                    self.log.debug(
+                        f"创建账户点击速率: {window_clicks}/s, 累计点击 {metrics['clicks_total']} 次, "
+                        f"进行中回调 {len(inflight_clicks)} 个, 收到回调 {metrics['callback_answers']} 次, "
+                        f"回调超时 {metrics['callback_timeouts']} 次, 收到回复 {metrics['reply_messages']} 条."
+                    )
+                    window_clicks = 0
+                    next_report_at = now + 1
+        finally:
+            for task in inflight_clicks:
+                task.cancel()
+            if inflight_clicks:
+                await asyncio.gather(*inflight_clicks, return_exceptions=True)
 
     async def _handle_credential_response(self, message: Message):
         text = self._message_text(message)
@@ -194,12 +336,12 @@ class EmbybossRegister:
                     self.log.info(f"注册成功")
                     return True
 
-                if interval_seconds:
+                if interval_seconds and interval_seconds > 0:
                     self.log.debug(f"注册失败, {interval_seconds} 秒后重试.")
                     await asyncio.sleep(interval_seconds)
                 else:
                     self.log.debug(f"注册失败, 即将重试.")
-                    return False
+                    await asyncio.sleep(0)
             except (MessageIdInvalid, ValueError, AttributeError):
                 # 面板失效或结构变化, 重新获取
                 self.log.debug("面板失效, 正在重新获取...")
@@ -270,50 +412,53 @@ class EmbybossRegister:
             self.log.warning("找不到创建账户按钮, 无法注册.")
             return False
 
-        await asyncio.sleep(random.uniform(*self.click_delay))
+        started_at = asyncio.get_running_loop().time()
+        deadline = asyncio.get_running_loop().time() + self.create_button_reply_timeout
+        outcome = asyncio.get_running_loop().create_future()
+        metrics = {
+            "clicks_total": 0,
+            "callback_answers": 0,
+            "callback_timeouts": 0,
+            "reply_messages": 0,
+        }
 
-        answer_text = ""
-        prompt_text = ""
-        chat_id = panel.chat.id
-
-        async with self.client.catch_reply(panel.chat.id) as f:
+        async with self._catch_reply_queue(panel.chat.id) as replies:
+            click_task = asyncio.create_task(
+                self._spam_create_button(panel, create_button, outcome, deadline, metrics)
+            )
+            reply_task = asyncio.create_task(
+                self._watch_registration_replies(replies, outcome, deadline, metrics)
+            )
             try:
-                answer: BotCallbackAnswer = await panel.click(create_button)
-                answer_text = (getattr(answer, "message", None) or "").strip()
-                if self._is_registration_closed(answer_text):
-                    self.log.debug("未开注, 将继续监控.")
-                    return False
-                if self._is_registration_failure(answer_text):
-                    self.log.warning("创建账户按钮点击后注册失败.")
-                    return False
-            except (TimeoutError, MessageIdInvalid):
-                pass
-            try:
-                msg: Message = await asyncio.wait_for(f, 5)
+                status, chat_id, source, signal_text = await asyncio.wait_for(
+                    outcome, timeout=self.create_button_reply_timeout
+                )
             except asyncio.TimeoutError:
-                if self._is_registration_prompt(answer_text):
-                    prompt_text = answer_text
-                elif self._is_registration_ready(answer_text):
-                    self.log.warning("收到注册资格回调但未收到注册提示, 无法注册.")
-                    return False
-                else:
-                    self.log.warning("创建账户按钮点击无响应, 无法注册.")
-                    return False
-            else:
-                prompt_text = self._message_text(msg)
-                chat_id = msg.chat.id
-                if self._is_registration_closed(prompt_text):
-                    self.log.debug("未开注, 将继续监控.")
-                    return False
-                if self._is_registration_failure(prompt_text):
-                    self.log.warning("创建账户按钮点击后注册失败.")
-                    return False
-
-        if not self._is_registration_prompt(prompt_text):
-            if self._is_registration_prompt(answer_text):
-                prompt_text = answer_text
-            else:
-                self.log.warning("未能正常进入注册状态, 注册失败.")
+                elapsed = asyncio.get_running_loop().time() - started_at
+                self.log.debug(
+                    f"未开注, {elapsed:.2f} 秒内累计点击 {metrics['clicks_total']} 次, "
+                    f"收到回调 {metrics['callback_answers']} 次, 回调超时 {metrics['callback_timeouts']} 次, "
+                    f"收到回复 {metrics['reply_messages']} 条."
+                )
                 return False
+            finally:
+                click_task.cancel()
+                reply_task.cancel()
+                await asyncio.gather(click_task, reply_task, return_exceptions=True)
+
+        if status == "failure":
+            self.log.warning(
+                f"创建账户按钮点击后注册失败: 来源={source or 'unknown'}, "
+                f"信号={self._preview_text(signal_text)}, 累计点击 {metrics['clicks_total']} 次."
+            )
+            return False
+
+        elapsed = asyncio.get_running_loop().time() - started_at
+        self.log.debug(
+            f"进入注册状态: 来源={source or 'unknown'}, 耗时 {elapsed:.2f} 秒, "
+            f"累计点击 {metrics['clicks_total']} 次, 收到回调 {metrics['callback_answers']} 次, "
+            f"回调超时 {metrics['callback_timeouts']} 次, 收到回复 {metrics['reply_messages']} 条, "
+            f"信号={self._preview_text(signal_text)}."
+        )
 
         return await self._submit_credentials(chat_id)
