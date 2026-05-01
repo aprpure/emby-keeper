@@ -150,6 +150,35 @@ class EmbybossRegister:
     def _is_registration_failure(cls, text: str):
         return any(keyword in text for keyword in cls.registration_failure_keywords)
 
+    @staticmethod
+    def _get_create_button(panel: Message):
+        reply_markup = getattr(panel, "reply_markup", None)
+        buttons = getattr(reply_markup, "inline_keyboard", None)
+        if not buttons:
+            return None
+        for row in buttons:
+            for button in row:
+                if "创建账户" in button.text:
+                    return button.text
+        return None
+
+    async def _get_recent_panel(self, bot: str, limit: int = 5):
+        async for message in self.client.get_chat_history(bot, limit=limit):
+            if not message:
+                continue
+            if self._get_create_button(message):
+                return message
+        return None
+
+    async def _get_panel(self, bot: str):
+        panel = await self._get_recent_panel(bot)
+        if panel:
+            self.log.debug("复用最近的注册面板, 无需重新发送 /start.")
+            return panel
+
+        self.log.debug("未找到可复用的注册面板, 正在发送 /start 获取新面板.")
+        return await self.client.wait_reply(bot, "/start")
+
     async def _watch_registration_replies(
         self,
         replies: asyncio.Queue,
@@ -324,7 +353,7 @@ class EmbybossRegister:
 
     async def run_continuous(self, bot: str, interval_seconds: float = 1):
         try:
-            panel = await self.client.wait_reply(bot, "/start")
+            panel = await self._get_panel(bot)
         except asyncio.TimeoutError:
             self.log.warning("初始命令无响应, 无法注册.")
             return False
@@ -346,7 +375,7 @@ class EmbybossRegister:
                 # 面板失效或结构变化, 重新获取
                 self.log.debug("面板失效, 正在重新获取...")
                 try:
-                    panel = await self.client.wait_reply(bot, "/start")
+                    panel = await self._get_panel(bot)
                 except asyncio.TimeoutError:
                     if interval_seconds:
                         self.log.warning("重新获取面板失败, 等待后重试.")
@@ -364,7 +393,7 @@ class EmbybossRegister:
 
     async def _register_once(self, bot: str):
         try:
-            panel = await self.client.wait_reply(bot, "/start")
+            panel = await self._get_panel(bot)
         except asyncio.TimeoutError:
             self.log.warning("初始命令无响应, 无法注册.")
             return False
@@ -397,16 +426,7 @@ class EmbybossRegister:
         return await self._attempt_with_panel(panel)
 
     async def _attempt_with_panel(self, panel: Message):
-        # 点击创建账户按钮
-        buttons = panel.reply_markup.inline_keyboard
-        create_button = None
-        for row in buttons:
-            for button in row:
-                if "创建账户" in button.text:
-                    create_button = button.text
-                    break
-            if create_button:
-                break
+        create_button = self._get_create_button(panel)
 
         if not create_button:
             self.log.warning("找不到创建账户按钮, 无法注册.")
