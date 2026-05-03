@@ -58,7 +58,8 @@ class LocalLink:
         return self.mode != "local"
 
     def supports_service(self, service: str) -> bool:
-        if service == "registrar":
+        # 这些是功能入口级认证, 本地替代开启后应允许进入, 再由具体站点按需检查额外能力.
+        if service in {"registrar", "checkiner", "monitor", "messager"}:
             return True
 
         cfg = self.cfg
