@@ -421,33 +421,43 @@ class Link:
 
     async def visual(self, photo, options: List[str], question=None) -> Tuple[Optional[str], Optional[str]]:
         """向机器人发送视觉问题解答请求."""
-        if self.use_local_backend:
+        async def local_call():
             photo_bytes = await self._download_photo(photo)
             if photo_bytes:
                 return await self.local.visual(photo_bytes, options, question)
             return None, None
-        cmd = f"/visual {self.instance} {'/'.join(options)}"
-        if question:
-            cmd += f" {question}"
-        results = await self.post(cmd, photo=photo, timeout=20, name="请求视觉问题解答")
-        if results:
-            return results.get("answer", None), results.get("by", None)
-        else:
-            return None, None
+
+        async def remote_call():
+            cmd = f"/visual {self.instance} {'/'.join(options)}"
+            if question:
+                cmd += f" {question}"
+            results = await self.post(cmd, photo=photo, timeout=20, name="请求视觉问题解答")
+            if results:
+                return results.get("answer", None), results.get("by", None)
+            else:
+                return None, None
+
+        return await self._call_with_remote_fallback(
+            local_call, remote_call, lambda result: bool(result and result[0]), "visual"
+        )
 
     async def ocr(self, photo) -> Optional[str]:
         """向机器人发送 OCR 解答请求."""
-        if self.use_local_backend:
+        async def local_call():
             photo_bytes = await self._download_photo(photo)
             if photo_bytes:
                 return await self.local.ocr(photo_bytes)
             return None
-        cmd = f"/ocr {self.instance}"
-        results = await self.post(cmd, photo=photo, timeout=20, name="请求验证码解答")
-        if results:
-            return results.get("answer", None)
-        else:
-            return None
+
+        async def remote_call():
+            cmd = f"/ocr {self.instance}"
+            results = await self.post(cmd, photo=photo, timeout=20, name="请求验证码解答")
+            if results:
+                return results.get("answer", None)
+            else:
+                return None
+
+        return await self._call_with_remote_fallback(local_call, remote_call, lambda result: bool(result), "ocr")
 
     async def send_log(self, message):
         """向机器人发送日志记录请求."""

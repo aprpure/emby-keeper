@@ -30,10 +30,10 @@ class TerminusCheckin(AnswerBotCheckin):
             for i in range(3):
                 result, by = await Link(self.client).visual(message.photo.file_id, options_cleaned)
                 if result:
-                    self.log.debug(f"已通过远端 ({by}) 解析答案: {result}.")
+                    self.log.debug(f"已通过视觉能力 ({by}) 解析答案: {result}.")
                     break
                 else:
-                    self.log.warning(f"远端解析失败, 正在重试解析 ({i + 1}/3).")
+                    self.log.warning(f"视觉解析失败, 正在重试解析 ({i + 1}/3).")
             else:
                 self.log.warning(f"签到失败: 验证码识别错误.")
                 return await self.fail()

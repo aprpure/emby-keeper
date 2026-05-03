@@ -42,10 +42,10 @@ class CCCheckin(BotCheckin):
         for i in range(3):
             result: str = await Link(self.client).ocr(message.photo.file_id)
             if result:
-                self.log.debug(f"远端已解析答案: {result}.")
+                self.log.debug(f"已通过 OCR 能力解析答案: {result}.")
                 break
             else:
-                self.log.warning(f"远端解析失败, 正在重试解析 ({i + 1}/3).")
+                self.log.warning(f"OCR 解析失败, 正在重试解析 ({i + 1}/3).")
         else:
             self.log.warning(f"签到失败: 验证码识别错误.")
             return await self.fail()

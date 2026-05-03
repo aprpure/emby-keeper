@@ -102,6 +102,8 @@ def _install_test_stubs():
         allow_remote_fallback_value = True
         wssocks_result = (None, None)
         captcha_wssocks_result = (None, None)
+        visual_result = (None, None)
+        ocr_result = None
 
         def __init__(self, client):
             self.client = client
@@ -118,6 +120,12 @@ def _install_test_stubs():
 
         async def captcha_wssocks(self, token, url, user_agent=None):
             return type(self).captcha_wssocks_result
+
+        async def visual(self, photo_bytes, options, question=None):
+            return type(self).visual_result
+
+        async def ocr(self, photo_bytes):
+            return type(self).ocr_result
 
     link_local_module.LocalLink = LocalLink
     sys.modules["embykeeper.telegram.link_local"] = link_local_module
@@ -200,3 +208,49 @@ def test_download_photo_supports_in_memory_result_for_file_id_inputs():
     link = Link(client)
 
     assert asyncio.run(link._download_photo("file-id")) == b"image-bytes"
+
+
+def test_visual_falls_back_to_remote_when_local_backend_returns_no_answer():
+    LocalLink.allow_remote_fallback_value = True
+    LocalLink.visual_result = (None, None)
+    client = make_client()
+
+    async def fake_download_media(photo, in_memory=False):
+        assert photo == "file-id"
+        return SimpleNamespace(getvalue=lambda: b"image-bytes")
+
+    client.download_media = fake_download_media
+    link = Link(client)
+    calls = []
+
+    async def fake_post(cmd, photo=None, timeout=0, name=None):
+        calls.append((cmd, photo, timeout, name))
+        return {"answer": "美女", "by": "remote"}
+
+    link.post = fake_post
+
+    assert asyncio.run(link.visual("file-id", ["内衣", "美女"])) == ("美女", "remote")
+    assert len(calls) == 1
+
+
+def test_ocr_falls_back_to_remote_when_local_backend_returns_no_answer():
+    LocalLink.allow_remote_fallback_value = True
+    LocalLink.ocr_result = None
+    client = make_client()
+
+    async def fake_download_media(photo, in_memory=False):
+        assert photo == "file-id"
+        return SimpleNamespace(getvalue=lambda: b"image-bytes")
+
+    client.download_media = fake_download_media
+    link = Link(client)
+    calls = []
+
+    async def fake_post(cmd, photo=None, timeout=0, name=None):
+        calls.append((cmd, photo, timeout, name))
+        return {"answer": "1234"}
+
+    link.post = fake_post
+
+    assert asyncio.run(link.ocr("file-id")) == "1234"
+    assert len(calls) == 1
