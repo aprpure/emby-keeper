@@ -46,6 +46,17 @@ class Link:
         rd.seed(uuid.getnode())
         return uuid.UUID(int=rd.getrandbits(128))
 
+    async def _call_with_remote_fallback(self, local_call, remote_call, success_check, name: str):
+        if not self.use_local_backend:
+            return await remote_call()
+
+        result = await local_call()
+        if success_check(result) or not self.local.allow_remote_fallback:
+            return result
+
+        self.log.debug(f"本地后端未能完成 {name}, 正在回退远端服务.")
+        return await remote_call()
+
     async def delete_messages(self, messages: List[Message]):
         """删除一系列消息."""
 
@@ -280,55 +291,77 @@ class Link:
 
     async def captcha(self, site: str, url: str = None) -> Optional[str]:
         """向机器人发送验证码解析请求."""
-        if self.use_local_backend:
+        async def local_call():
             return await self.local.captcha(site, url)
-        cmd = f"/captcha {self.instance} {site}"
-        if url:
-            cmd += f" {url}"
-        results = await self.post(cmd, timeout=120, name="请求跳过验证码")
-        if results:
-            return results.get("token", None)
-        else:
-            return None
+
+        async def remote_call():
+            cmd = f"/captcha {self.instance} {site}"
+            if url:
+                cmd += f" {url}"
+            results = await self.post(cmd, timeout=120, name="请求跳过验证码")
+            if results:
+                return results.get("token", None)
+            else:
+                return None
+
+        return await self._call_with_remote_fallback(local_call, remote_call, lambda result: bool(result), "captcha")
 
     async def captcha_content(self, site: str, url: str = None) -> Optional[str]:
         """向机器人发送带验证码的远程网页解析请求."""
-        if self.use_local_backend:
+        async def local_call():
             return await self.local.captcha_content(site, url)
-        cmd = f"/captcha {self.instance} {site}"
-        if url:
-            cmd += f" {url}"
-        results = await self.post(cmd, timeout=120, name="请求跳过验证码")
-        if results:
-            return results.get("content", None)
-        else:
-            return None
+
+        async def remote_call():
+            cmd = f"/captcha {self.instance} {site}"
+            if url:
+                cmd += f" {url}"
+            results = await self.post(cmd, timeout=120, name="请求跳过验证码")
+            if results:
+                return results.get("content", None)
+            else:
+                return None
+
+        return await self._call_with_remote_fallback(
+            local_call, remote_call, lambda result: bool(result), "captcha_content"
+        )
 
     async def wssocks(self) -> Tuple[Optional[str], Optional[str]]:
         """向机器人发送逆向 Socks 代理隧道监听请求."""
-        if self.use_local_backend:
+        async def local_call():
             return await self.local.wssocks()
-        cmd = f"/wssocks {self.instance}"
-        results = await self.post(cmd, timeout=20, name="请求新建代理隧道以跳过验证码")
-        if results:
-            return results.get("url", None), results.get("token", None)
-        else:
-            return None, None
+
+        async def remote_call():
+            cmd = f"/wssocks {self.instance}"
+            results = await self.post(cmd, timeout=20, name="请求新建代理隧道以跳过验证码")
+            if results:
+                return results.get("url", None), results.get("token", None)
+            else:
+                return None, None
+
+        return await self._call_with_remote_fallback(
+            local_call, remote_call, lambda result: bool(result and result[1]), "wssocks"
+        )
 
     async def captcha_wssocks(
         self, token: str, url: str, user_agent: Optional[str] = None
     ) -> Tuple[Optional[str], Optional[str]]:
         """向机器人发送通过代理隧道进行验证码解析请求."""
-        if self.use_local_backend:
+        async def local_call():
             return await self.local.captcha_wssocks(token, url, user_agent)
-        cmd = f"/captcha_wssocks {self.instance} {token} {url}"
-        if user_agent:
-            cmd += f" {user_agent}"
-        results = await self.post(cmd, timeout=120, name="请求跳过验证码")
-        if results:
-            return results.get("cf_clearance", None), results.get("useragent", None)
-        else:
-            return None, None
+
+        async def remote_call():
+            cmd = f"/captcha_wssocks {self.instance} {token} {url}"
+            if user_agent:
+                cmd += f" {user_agent}"
+            results = await self.post(cmd, timeout=120, name="请求跳过验证码")
+            if results:
+                return results.get("cf_clearance", None), results.get("useragent", None)
+            else:
+                return None, None
+
+        return await self._call_with_remote_fallback(
+            local_call, remote_call, lambda result: bool(result and result[0]), "captcha_wssocks"
+        )
 
     async def pornemby_answer(self, question: str) -> Tuple[Optional[str], Optional[str]]:
         """向机器人发送问题回答请求."""
@@ -369,10 +402,19 @@ class Link:
         try:
             if isinstance(photo, bytes):
                 return photo
-            bio = BytesIO()
-            await self.client.download_media(photo, file_name=bio)
-            bio.seek(0)
-            return bio.read()
+
+            data = await self.client.download_media(photo, in_memory=True)
+            if isinstance(data, bytes):
+                return data
+
+            if hasattr(data, "getvalue"):
+                return data.getvalue()
+
+            if hasattr(data, "read"):
+                data.seek(0)
+                return data.read()
+
+            return None
         except Exception as e:
             self.log.debug(f"下载图片失败: {e}")
             return None
