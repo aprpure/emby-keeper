@@ -43,6 +43,8 @@ class EPubGroupChatCheckin(BotCheckin):
                     if i < len(cmds):
                         await asyncio.sleep(self.bot_send_interval)
                     await self.send(cmd)
+                await asyncio.sleep(self.bot_send_interval)
+                await self.send("就位")
                 await self.finish(message="已发送发言")
                 return
         else:
