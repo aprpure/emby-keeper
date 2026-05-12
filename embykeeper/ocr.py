@@ -51,18 +51,11 @@ class OCRService:
         """使用LLM进行OCR识别"""
         from . import llm
 
-        try:
-            # 将BytesIO转换为bytes
-            photo_bytes = image_data.getvalue()
-            
-            # 使用LLM进行OCR识别
-            result = await llm.ocr(photo_bytes)
-            if result:
-                return result.strip()
-            else:
-                raise Exception("LLM OCR识别返回空结果")
-        except Exception as e:
-            raise Exception(f"OCR识别失败: {str(e)}")
+        photo_bytes = image_data.getvalue()
+        result = await llm.ocr(photo_bytes)
+        if result:
+            return result.strip()
+        raise Exception("LLM OCR识别返回空结果, 请检查 LLM 配置")
 
     def subscribe(self):
         """增加使用者计数"""

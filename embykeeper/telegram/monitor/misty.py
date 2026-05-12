@@ -14,7 +14,6 @@ misty_monitor_pool = {}
 
 
 class MistyMonitor(Monitor):
-    ocr = "digit5-large@v1"
     ocr_lock = asyncio.Lock()
 
     name = "Misty"
@@ -45,7 +44,7 @@ class MistyMonitor(Monitor):
                         msg = await wr("⚡️注册账号")
                         if "请输入验证码" in (msg.caption or msg.text):
                             data = await self.client.download_media(msg, in_memory=True)
-                            ocr = await OCRService.get(self.ocr)
+                            ocr = await OCRService.get()
                             try:
                                 with ocr:
                                     ocr_text = await ocr.run(data)
