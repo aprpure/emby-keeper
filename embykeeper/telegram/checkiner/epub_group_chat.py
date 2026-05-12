@@ -25,6 +25,7 @@ class EPubGroupChatCheckin(BotCheckin):
             answer, by = await Link(self.client).gpt(prompt)
             if not answer:
                 continue
+            self.log.debug(f"LLM 返回内容: {answer}")
             lines = [
                 l.lstrip("@@@").strip()
                 for l in answer.splitlines()

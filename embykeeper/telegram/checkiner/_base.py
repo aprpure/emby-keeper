@@ -551,8 +551,8 @@ class BotCheckin(BaseBotCheckin):
             else:
                 self.log.info(f"签到失败: 接收到空验证码, 正在重试.")
                 await self.retry()
-        except asyncio.TimeoutError:
-            self.log.info("签到失败: 验证码识别失败, 正在重试.")
+        except Exception as e:
+            self.log.info(f"签到失败: 验证码识别失败 ({e}), 正在重试.")
             await self.retry()
             return
 

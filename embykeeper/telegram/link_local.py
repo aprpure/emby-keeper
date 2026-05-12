@@ -1,7 +1,6 @@
 import asyncio
 import base64
 from html import unescape
-from io import BytesIO
 import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
@@ -11,7 +10,6 @@ from loguru import logger
 
 from embykeeper import llm
 from embykeeper.config import config
-from embykeeper.ocr import OCRService
 from embykeeper.utils import get_proxy_str
 
 
@@ -66,12 +64,13 @@ class LocalLink:
         if not cfg:
             return False
 
-        supported = {"ocr"}
+        supported = set()
         if self.has_llm:
-            supported.update({"gpt", "visual", "prime", "super", "pornemby_pack"})
+            supported.update({"ocr", "gpt", "visual", "prime", "super", "pornemby_pack"})
         if self.has_helper:
             supported.update(
                 {
+                    "ocr",
                     "gpt",
                     "visual",
                     "captcha",
@@ -243,16 +242,6 @@ class LocalLink:
         return None, None
 
     async def ocr(self, photo_bytes: bytes) -> Optional[str]:
-        try:
-            ocr = await OCRService.get()
-            with ocr:
-                result = await ocr.run(BytesIO(photo_bytes))
-            if result:
-                self.log.debug(f"本地 OCR 识别成功: {result}")
-                return result
-        except Exception as e:
-            self.log.debug(f"本地 OCR 识别失败: {e}")
-
         if self.has_llm:
             answer = await llm.ocr(photo_bytes)
             if answer:

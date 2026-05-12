@@ -1,5 +1,7 @@
 import asyncio
+import random
 import re
+import string
 
 from pyrogram.types import Message
 from pyrogram import filters
@@ -19,10 +21,11 @@ class CcMonitor(Monitor):
     bot_username = "EmbyCc_bot"
     notify_create_name = True
     additional_auth = ["prime"]
-    register_username = "purejam"
-    register_code = "1998"
 
     async def init(self):
+        self.register_username = "".join(random.choices(string.ascii_lowercase, k=8))
+        self.register_code = "".join(random.choices(string.digits, k=4))
+        self.log.info(f"随机用户名: {self.register_username}, 随机注册码: {self.register_code}")
         """启动时先检查历史记录中的邀请码"""
         self.log.info("正在检查历史记录...")
         try:

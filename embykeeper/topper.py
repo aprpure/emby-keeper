@@ -56,14 +56,6 @@ async def topper():
         queue_text = f" Queue: {' '.join(queue_stats)}" if queue_stats else ""
         return failed, pending, using, idle, queue_text
 
-    def get_ocr_stats():
-        """获取OCR子进程状态"""
-        children = process.children()
-        if not children:
-            return None
-        total_mem = sum(p.memory_info().rss for p in children) / 1024 / 1024
-        return f"OCR: {len(children)} ({total_mem:.1f} MB)"
-
     def get_stats():
         # 创建状态表格
         table = Table(show_header=False, box=None)
@@ -76,11 +68,6 @@ async def topper():
             ("Embykeeper >", "bright_blue"),
             (f"MEM: {mem_text} MB, CPU: {cpu_percent:.1f}%", "bright_blue"),
         ]
-
-        # OCR状态
-        ocr_stats = get_ocr_stats()
-        if ocr_stats:
-            sys_stats.append((ocr_stats, "bright_blue"))
 
         # Client状态
         if tele_used:

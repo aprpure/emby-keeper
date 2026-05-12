@@ -37,10 +37,6 @@
 - 单选题求解 `pornemby_answer`
 - 部分网页正文提取 `captcha_content`
 
-无需 LLM 也能本地完成的能力:
-
-- OCR 图片识别, 由本地 `OCRService` 和 `ddddocr` 提供
-
 仅靠 LLM 无法可靠完成, 需要 `helper_command` 的能力:
 
 - 验证码令牌 `captcha`

@@ -1,5 +1,7 @@
 import asyncio
+import random
 import re
+import string
 
 from pyrogram.types import Message
 from pyrogram import filters
@@ -13,23 +15,24 @@ __ignore__ = True
 
 
 class CaihongMonitor(Monitor):
-    name = "彩虹Emby"
+    name = "飞跃彩虹Emby"
     chat_name = "caihongemby"
-    chat_keyword = r"飞跃彩虹-\d+-Register_[\w]+"
+    chat_keyword = r"SAKURA-\d+-Register_[\w]+"
     bot_username = "FeiyueEmby_bot"
     notify_create_name = True
     additional_auth = ["prime"]
-    register_username = "purejam"
-    register_code = "1998"
 
     async def init(self):
         """启动时先检查历史记录中的邀请码"""
+        self.register_username = "".join(random.choices(string.ascii_lowercase, k=8))
+        self.register_code = "".join(random.choices(string.digits, k=4))
+        self.log.info(f"随机用户名: {self.register_username}, 密码: {self.register_code}")
         self.log.info("正在检查历史记录...")
         try:
             async for message in self.client.get_chat_history(self.chat_name[0] if isinstance(self.chat_name, list) else self.chat_name, limit=100):
                 text = message.text or message.caption
                 if text:
-                    keys = re.findall(r"飞跃彩虹-\d+-Register_[\w]+", text)
+                    keys = re.findall(r"SAKURA-\d+-Register_[\w]+", text)
                     if keys:
                         self.log.info(f"发现历史邀请码: {keys}")
                         await self._try_invite_codes(keys)
@@ -117,7 +120,7 @@ class CaihongMonitor(Monitor):
 
     async def on_trigger(self, message: Message, key, reply):
         """监控到新消息时触发"""
-        keys = re.findall(r"飞跃彩虹-\d+-Register_[\w]+", message.text or message.caption)
+        keys = re.findall(r"SAKURA-\d+-Register_[\w]+", message.text or message.caption)
         if not keys:
             return
         await self._try_invite_codes(keys)

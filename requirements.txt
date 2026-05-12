@@ -8,7 +8,6 @@ loguru
 faker
 aiofiles
 python-dateutil
-ddddocrfix>=1.5.5
 kurigram==2.2.12
 tgcrypto
 pillow>10.0.0

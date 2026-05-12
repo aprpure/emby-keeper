@@ -2,7 +2,6 @@ from pathlib import Path
 import random
 from tqdm import tqdm
 
-from ddddocr import DdddOcr
 from PIL import Image
 from pyrogram.enums import ParseMode
 
@@ -32,9 +31,12 @@ async def generate(config_file: Path, output: Path = "captchas.txt"):
 
 
 @app.async_command()
-async def label(config_file: Path, inp: Path = "captchas.txt", onnx: Path = None, charsets: Path = None):
+async def label(config_file: Path, inp: Path = "captchas.txt"):
+    """使用 LLM 对验证码进行自动标记."""
+    import asyncio
+    from embykeeper import llm
+
     await config.reload_conf(config_file)
-    ocr = DdddOcr(beta=True, show_ad=False, import_onnx_path=str(onnx), charsets_path=str(charsets))
     output = Path(__file__).parent / "data"
     output.mkdir(exist_ok=True, parents=True)
     with open(inp) as f:
@@ -44,14 +46,18 @@ async def label(config_file: Path, inp: Path = "captchas.txt", onnx: Path = None
         async for tg in clients:
             for photo in tqdm(photos, desc="标记验证码"):
                 data = await tg.download_media(photo, in_memory=True)
-                image = Image.open(data)
+                image_bytes = data.getvalue()
+                ocr_text = await llm.ocr(image_bytes)
+                if not ocr_text:
+                    continue
                 await tg.send_photo(
-                    chat, photo, caption=f"`{ocr.classification(image)}`", parse_mode=ParseMode.MARKDOWN
+                    chat, photo, caption=f"`{ocr_text}`", parse_mode=ParseMode.MARKDOWN
                 )
                 labelmsg = await tg.wait_reply(chat, timeout=None, outgoing=True)
                 if not len(labelmsg.text) == 4:
                     continue
                 else:
+                    image = Image.open(data)
                     image.save(output / f"{labelmsg.text}.png")
 
 
