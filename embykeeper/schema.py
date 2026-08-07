@@ -61,6 +61,7 @@ class ProxyConfig(ConfigModel):
 
 
 class CheckinerConfig(ConfigModel):
+    enabled: Optional[bool] = True
     time_range: Optional[UseStr] = DEFAULT_TIME_RANGE
     interval_days: Optional[UseStr] = "1"
     timeout: Optional[int] = 120
@@ -75,6 +76,8 @@ class CheckinerConfig(ConfigModel):
 
 
 class MonitorConfig(ConfigModel):
+    enabled: Optional[bool] = True
+
     model_config = {"extra": "allow"}
 
     def get_site_config(self, site: str) -> Dict[str, Any]:
@@ -82,6 +85,8 @@ class MonitorConfig(ConfigModel):
 
 
 class MessagerConfig(ConfigModel):
+    enabled: Optional[bool] = True
+
     model_config = {"extra": "allow"}
 
     def get_site_config(self, site: str) -> Dict[str, Any]:
@@ -89,6 +94,7 @@ class MessagerConfig(ConfigModel):
 
 
 class RegistrarConfig(ConfigModel):
+    enabled: Optional[bool] = True
     concurrency: Optional[int] = 1
     click_delay: Optional[List[float]] = [0.5, 1.5]
 
@@ -115,6 +121,7 @@ class SiteConfig(ConfigModel):
 
 
 class MediaServerBaseConfig(ConfigModel):
+    enabled: Optional[bool] = True
     time_range: Optional[UseStr] = DEFAULT_TIME_RANGE
     interval_days: Optional[UseStr] = DEFAULT_EMBY_INTERVAL_DAYS
     concurrency: Optional[int] = 1
@@ -122,6 +129,7 @@ class MediaServerBaseConfig(ConfigModel):
 
 
 class EmbyAccount(ConfigModel):
+    id: Optional[str] = None
     url: UseHttpUrl
     username: str
     password: str
@@ -157,6 +165,7 @@ class EmbyConfig(MediaServerBaseConfig):
 
 
 class SubsonicAccount(ConfigModel):
+    id: Optional[str] = None
     url: UseHttpUrl
     username: str
     password: str

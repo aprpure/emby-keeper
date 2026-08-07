@@ -377,6 +377,12 @@ class Emby:
             cache.set(f"emby.credential.{self.hostname}.{self.a.username}", cache_data)
             return self.token
 
+    async def get_server_info(self) -> dict:
+        resp = await self._request("GET", "/System/Info/Public")
+        if resp.status_code != 200:
+            raise EmbyRequestError(f"无法获取服务器信息 ({resp.status_code})")
+        return resp.json()
+
     async def play(self, item: Union[dict, int], time: float = 10, total_ticks: Optional[int] = None):
         if isinstance(item, dict):
             try:

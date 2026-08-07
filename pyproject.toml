@@ -46,6 +46,7 @@ content-type = "text/markdown"
 [project.scripts]
 embykeeper = "embykeeper.cli:app"
 embykeeperweb = "embykeeperweb.app:cli"
+embykeeperapi = "embykeeperapi.app:cli"
 
 [tool.setuptools]
 zip-safe = false
