@@ -253,6 +253,15 @@ class LLMConfig(ConfigModel):
     auth_services: Optional[List[str]] = None
 
 
+class TurnstileConfig(ConfigModel):
+    """Cloudflare Turnstile 本地求解配置 (月饼 embyguard 等)."""
+
+    # 本地 / 自建 turnsolve 服务地址, 例如 http://127.0.0.1:8889
+    solver_url: Optional[str] = None
+    # YesCaptcha API Key; 设置后优先走 YesCaptcha, 不再请求 solver_url
+    yescaptcha_key: Optional[str] = None
+
+
 class Config(ConfigModel):
     alias_map: ClassVar[Dict[str, str]] = {
         "emby.time_range": "watchtime",
@@ -285,6 +294,7 @@ class Config(ConfigModel):
     notifier: Optional[NotifierConfig] = NotifierConfig()
     site: Optional[SiteConfig] = None
     llm: Optional[LLMConfig] = None
+    turnstile: Optional[TurnstileConfig] = None
 
     # 向后兼容字段
     time: Optional[str] = None
