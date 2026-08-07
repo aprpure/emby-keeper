@@ -4,10 +4,14 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   draft:
@@ -15,9 +19,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Upload Release
         uses: ncipollo/release-action@v1.14.0
         with:
           draft: true
           token: ${{ secrets.GITHUB_TOKEN }}
-          bodyFile: '.github/RELEASE_BODY.md'
+          bodyFile: .github/RELEASE_BODY.md
+          generateReleaseNotes: true

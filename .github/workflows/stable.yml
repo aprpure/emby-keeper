@@ -7,25 +7,40 @@ on:
 
 permissions:
   contents: write
-  actions: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
 
 jobs:
   update-stable:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Need a token that can force-push the stable branch.
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Create or update stable branch
-      run: |
-        if [ $(git ls-remote --heads origin stable | wc -l) -eq 0 ]; then
-          git checkout -b stable
-        else
-          git checkout stable
-        fi
-        git reset --hard ${GITHUB_REF#refs/tags/}
-        git push origin stable --force
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create or update stable branch
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          if [ -z "$tag" ] || [ "$tag" = "$GITHUB_REF" ]; then
+            echo "This job expects a release tag ref; got: $GITHUB_REF"
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin stable >/dev/null 2>&1; then
+            git fetch origin stable
+            git checkout -B stable origin/stable
+          else
+            git checkout -B stable
+          fi
+
+          git reset --hard "$tag"
+          git push origin stable --force
