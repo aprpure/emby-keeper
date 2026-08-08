@@ -69,8 +69,14 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=docker-prod
-          cache-to: type=gha,mode=max,scope=docker-prod
+          # GHA + registry cache: keep dependency layers stable across runners/releases
+          # so code-only changes stay incremental for both build and user pulls.
+          cache-from: |
+            type=gha,scope=docker-prod-${{ env.PLATFORM_PAIR }}
+            type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-prod-${{ env.PLATFORM_PAIR }}
+          cache-to: |
+            type=gha,mode=max,scope=docker-prod-${{ env.PLATFORM_PAIR }}
+            type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-prod-${{ env.PLATFORM_PAIR }},mode=max
 
       - name: Export digest
         run: |

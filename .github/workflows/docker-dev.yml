@@ -82,8 +82,13 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=docker-dev
-          cache-to: type=gha,mode=max,scope=docker-dev
+          # GHA + registry cache, scoped per platform to avoid amd64/arm64 cross-pollution.
+          cache-from: |
+            type=gha,scope=docker-dev-${{ env.PLATFORM_PAIR }}
+            type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-dev-${{ env.PLATFORM_PAIR }}
+          cache-to: |
+            type=gha,mode=max,scope=docker-dev-${{ env.PLATFORM_PAIR }}
+            type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-dev-${{ env.PLATFORM_PAIR }},mode=max
 
       - name: Export digest
         run: |
