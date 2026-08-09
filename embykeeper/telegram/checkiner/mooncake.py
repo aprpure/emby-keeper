@@ -1,5 +1,4 @@
 import asyncio
-from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from curl_cffi.requests import AsyncSession, RequestsError
@@ -12,11 +11,7 @@ from embykeeper.utils import to_iterable, truncate_str, get_proxy_str, show_exce
 
 from ._templ_a import TemplateACheckin
 
-# 直接用仓库 utils 下的 TurnstileService (YesCaptcha / 本地 solver)
-_ROOT = Path(__file__).resolve().parents[3]
-if str(_ROOT) not in __import__("sys").path:
-    __import__("sys").path.insert(0, str(_ROOT))
-from utils.turnstile_service import TurnstileService  # noqa: E402
+from embykeeper.turnstile import TurnstileService
 
 
 class MooncakeCheckin(TemplateACheckin):

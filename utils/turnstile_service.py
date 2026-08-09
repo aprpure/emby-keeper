@@ -53,8 +53,8 @@ class TurnstileService:
     """Turnstile验证服务类
 
     支持两种后端（自动判断）：
-      - YESCAPTCHA_KEY 环境变量存在 → YesCaptcha API
-      - 否则 → turnsolve（默认 http://168.110.52.11:7860）
+      - YESCAPTCHA_KEY 环境变量 / config.toml yescaptcha_key 存在 → YesCaptcha API
+      - 否则 → turnsolve（config.toml solver_url / 环境变量 / 默认 127.0.0.1:8889）
 
     接口兼容 YesCaptchaSolver：
       solve_turnstile(website_url, website_key, premium=False) → token str
