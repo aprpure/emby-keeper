@@ -403,7 +403,9 @@ async def main(
             logger.info("当前在 Docker 容器中运行, 请确认该目录已挂载, 否则文件将在容器重建后丢失.")
     if verbosity:
         logger.warning(f"您当前处于调试模式: 日志等级 {verbosity}.")
-        app.pretty_exceptions_enable = True
+        # 使用模块级 CLI app, 避免与下方 API create_app() 的局部变量 app 冲突
+        # (Python 会把整个函数里的 app 都当成局部变量, 导致这里 UnboundLocalError)
+        globals()["app"].pretty_exceptions_enable = True
     var.telegram_test_server = telegram_test_server
     if telegram_test_server:
         logger.warning("您当前处于 Telegram 测试服务器模式, 请谨慎使用.")
@@ -426,9 +428,9 @@ async def main(
         import uvicorn
         from .api import create_app
 
-        app = create_app()
+        api_app = create_app()
         config_obj = uvicorn.Config(
-            app,
+            api_app,
             host=api_host,
             port=api_port,
             access_log=verbosity >= 1,
