@@ -185,7 +185,14 @@ class ClientsSession:
                 resp = s.recvfrom(1024)[0]
             return struct.unpack("!12I", resp)[10] - NTP_DELTA + struct.unpack("!12I", resp)[11] / 2**32
 
-        ntp_servers = ["pool.ntp.org", "ntp.aliyun.com", "time.google.com"]
+        ntp_servers = [
+            "pool.ntp.org",
+            "ntp.aliyun.com",
+            "time.google.com",
+            "time.cloudflare.com",  # Cloudflare 有时更可达
+            "ntp.tencent.com",
+            "cn.pool.ntp.org",
+        ]
         last_err = None
         for server in ntp_servers:
             try:
@@ -201,7 +208,11 @@ class ClientsSession:
                 logger.debug(f"NTP 时间源 {server} 请求失败: {err_msg}")
                 last_err = e
                 continue
-        logger.warning(f"所有 NTP 时间源均不可用, 系统时间检测将跳过. (最后错误: {last_err})")
+        # 全部失败也不阻断启动; 仅警告
+        logger.warning(
+            f"所有 NTP 时间源均不可用, 系统时间检测将跳过. "
+            f"(最后错误: {last_err}). 若 Telegram 登录异常, 请检查防火墙是否放行 UDP/123, 或手动校准系统时间."
+        )
         return False
 
     async def get_session_str_from_telethon(self, account: TelegramAccount):

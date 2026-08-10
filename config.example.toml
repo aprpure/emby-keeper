@@ -229,8 +229,8 @@ concurrency = 1
 # ================================================================================
 
 # [turnstile]
-# 自建 / 本地 turnsolve 服务地址:
-# solver_url = "http://127.0.0.1:8889"
+# 自建 turnsolve 地址; 多个用逗号分隔, 失败自动换下一个:
+# solver_url = "http://127.0.0.1:8889,http://10.0.0.2:8889"
 # YesCaptcha API Key (设置后优先走 YesCaptcha, 不再请求 solver_url):
 # yescaptcha_key = ""
 

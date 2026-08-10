@@ -156,7 +156,9 @@ class MooncakeCheckin(TemplateACheckin):
         return result
 
     def _turnstile_service(self) -> TurnstileService:
-        """从 config.toml [turnstile] / 环境变量构造求解器."""
+        """从 config.toml [turnstile] / 环境变量构造求解器.
+        solver_url 支持逗号分隔多个地址, 失败自动换下一个.
+        """
         t = getattr(config, "turnstile", None)
         return TurnstileService(
             solver_url=(getattr(t, "solver_url", None) or "") if t else "",
@@ -177,7 +179,10 @@ class MooncakeCheckin(TemplateACheckin):
         """
         try:
             svc = self._turnstile_service()
-            self.log.debug(f"Turnstile solver: {svc.solver_url}")
+            self.log.debug(
+                f"Turnstile solvers: {svc.solver_urls}"
+                + (f", yescaptcha={'on' if svc.yescaptcha_key else 'off'}")
+            )
             return await asyncio.to_thread(
                 svc.solve_turnstile,
                 website_url,

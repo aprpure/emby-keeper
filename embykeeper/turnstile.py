@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Optional
+from typing import List, Optional
 
 import requests
 from urllib.parse import urlparse
@@ -25,6 +25,26 @@ def _normalize_solver_base(url: str) -> str:
     """Strip trailing slash; empty → default turnsolve."""
     base = (url or "").strip().rstrip("/")
     return base or DEFAULT_SOLVER_URL
+
+
+def _split_solver_urls(raw: str) -> List[str]:
+    """支持逗号/分号/空白分隔的多个 solver 地址, 去重保序."""
+    if not raw:
+        return []
+    parts = []
+    for chunk in raw.replace(";", ",").replace("\n", ",").split(","):
+        u = chunk.strip()
+        if not u:
+            continue
+        parts.append(_normalize_solver_base(u))
+    # 去重保序
+    seen = set()
+    out = []
+    for u in parts:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
 
 
 def _config_turnstile():
@@ -56,10 +76,14 @@ class TurnstileService:
       - YESCAPTCHA_KEY 环境变量 / config.toml yescaptcha_key 存在 → YesCaptcha API
       - 否则 → turnsolve（config.toml solver_url / 环境变量 / 默认 127.0.0.1:8889）
 
+    solver_url 支持逗号分隔多个地址, 失败自动换下一个:
+      solver_url = "http://a:8889,http://b:8889"
+
     接口兼容 YesCaptchaSolver：
       solve_turnstile(website_url, website_key, premium=False) → token str
 
     默认对失败整轮重试 3 次（每次新建 task，不重用失败的 task_id）。
+    多 solver 时: 每个地址各自 max_attempts, 全挂再换下一个。
     """
 
     def __init__(self, solver_url="", yescaptcha_key=""):
@@ -80,7 +104,9 @@ class TurnstileService:
             or cfg_url
             or DEFAULT_SOLVER_URL
         )
-        self.solver_url = _normalize_solver_base(raw)
+        self.solver_urls = _split_solver_urls(raw) or [DEFAULT_SOLVER_URL]
+        # 兼容旧属性: 当前/首选地址
+        self.solver_url = self.solver_urls[0]
         self.yescaptcha_api = "https://api.yescaptcha.com"
 
     def solve_turnstile(
@@ -100,9 +126,69 @@ class TurnstileService:
         必须与页面渲染 widget 时一致，否则服务端会 invalid_turnstile。
 
         解码失败 / 创建任务失败时会整轮重试（每次新建 task），最多 max_attempts 次。
+        若配置了多个 solver_url, 当前地址耗尽重试后自动换下一个。
         """
         if max_attempts < 1:
             raise ValueError("max_attempts must be >= 1")
+
+        # YesCaptcha 优先: 不走本地 solver 列表
+        if self.yescaptcha_key:
+            return self._solve_with_backend(
+                website_url,
+                website_key,
+                action=action,
+                cdata=cdata,
+                max_attempts=max_attempts,
+                retry_delay=retry_delay,
+                solver_url=None,
+            )
+
+        last_error: Optional[Exception] = None
+        for idx, url in enumerate(self.solver_urls):
+            self.solver_url = url  # 当前使用的地址 (create_task/get_response 读它)
+            try:
+                return self._solve_with_backend(
+                    website_url,
+                    website_key,
+                    action=action,
+                    cdata=cdata,
+                    max_attempts=max_attempts,
+                    retry_delay=retry_delay,
+                    solver_url=url,
+                )
+            except Exception as e:
+                last_error = e
+                if idx + 1 < len(self.solver_urls):
+                    print(
+                        f"Turnstile solver {url} 失败, 切换下一个 "
+                        f"({idx + 1}/{len(self.solver_urls)}): {e}"
+                    )
+                    time.sleep(retry_delay)
+                else:
+                    print(
+                        f"Turnstile solver {url} 失败, 已无更多备用地址 "
+                        f"({idx + 1}/{len(self.solver_urls)}): {e}"
+                    )
+
+        assert last_error is not None
+        raise RuntimeError(
+            f"TurnstileService: 全部 solver 失败 ({len(self.solver_urls)} 个): {last_error}"
+        ) from last_error
+
+    def _solve_with_backend(
+        self,
+        website_url,
+        website_key,
+        *,
+        action: str = "",
+        cdata: str = "",
+        max_attempts: int = 3,
+        retry_delay: float = 2.0,
+        solver_url: Optional[str] = None,
+    ):
+        """在当前后端 (YesCaptcha 或指定 solver_url) 上重试 max_attempts 次."""
+        if solver_url:
+            self.solver_url = solver_url
 
         last_error: Optional[Exception] = None
         for attempt in range(1, max_attempts + 1):
@@ -112,10 +198,10 @@ class TurnstileService:
                 )
                 token = self.get_response(task_id)
                 if token:
-                    if attempt > 1:
+                    if attempt > 1 or (solver_url and solver_url != self.solver_urls[0]):
                         print(
                             f"Turnstile 求解成功 (attempt {attempt}/{max_attempts}, "
-                            f"task_id={task_id})"
+                            f"solver={self.solver_url or 'yescaptcha'}, task_id={task_id})"
                         )
                     return token
                 last_error = RuntimeError(
@@ -126,13 +212,15 @@ class TurnstileService:
 
             if attempt < max_attempts:
                 print(
-                    f"Turnstile 求解失败 (attempt {attempt}/{max_attempts}): "
+                    f"Turnstile 求解失败 (attempt {attempt}/{max_attempts}, "
+                    f"solver={self.solver_url or 'yescaptcha'}): "
                     f"{last_error}，{retry_delay:.0f}s 后重试..."
                 )
                 time.sleep(retry_delay)
             else:
                 print(
-                    f"Turnstile 求解失败 (attempt {attempt}/{max_attempts}): "
+                    f"Turnstile 求解失败 (attempt {attempt}/{max_attempts}, "
+                    f"solver={self.solver_url or 'yescaptcha'}): "
                     f"{last_error}，已达最大重试次数"
                 )
 
@@ -142,7 +230,8 @@ class TurnstileService:
         ):
             raise last_error
         raise RuntimeError(
-            f"TurnstileService: 求解失败 (attempts={max_attempts}): {last_error}"
+            f"TurnstileService: 求解失败 (attempts={max_attempts}, "
+            f"solver={self.solver_url or 'yescaptcha'}): {last_error}"
         ) from last_error
 
     def create_task(self, siteurl, sitekey, action: str = "", cdata: str = ""):
