@@ -34,7 +34,7 @@ async def generate(config_file: Path, output: Path = "captchas.txt"):
 async def label(config_file: Path, inp: Path = "captchas.txt"):
     """使用 LLM 对验证码进行自动标记."""
     import asyncio
-    from embykeeper import llm
+    from embykeeper.ocr import OCRService
 
     await config.reload_conf(config_file)
     output = Path(__file__).parent / "data"
@@ -47,7 +47,7 @@ async def label(config_file: Path, inp: Path = "captchas.txt"):
             for photo in tqdm(photos, desc="标记验证码"):
                 data = await tg.download_media(photo, in_memory=True)
                 image_bytes = data.getvalue()
-                ocr_text = await llm.ocr(image_bytes)
+                ocr_text = await OCRService.get().run(image_bytes)
                 if not ocr_text:
                     continue
                 await tg.send_photo(

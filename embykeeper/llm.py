@@ -11,6 +11,9 @@ from .utils import get_proxy_str
 
 logger = logger.bind(scheme="llm")
 
+# 通用 OCR 提示词; 验证码场景由 embykeeper.ocr 提供专用提示词并显式传入.
+GENERIC_OCR_PROMPT = "请识别图片中的文字, 只输出文字内容, 不要输出任何其他内容."
+
 
 async def _chat_completion(
     messages: list,
@@ -97,12 +100,25 @@ async def visual(photo_bytes: bytes, options: List[str], question: Optional[str]
     return await _chat_completion(messages, model=model, timeout=llm_cfg.timeout or 60)
 
 
-async def ocr(photo_bytes: bytes) -> Optional[str]:
+_ocr_warned = False
+
+
+async def ocr(
+    photo_bytes: bytes,
+    prompt: Optional[str] = None,
+    model: Optional[str] = None,
+    timeout: Optional[int] = None,
+) -> Optional[str]:
     """使用 LLM 视觉模型进行 OCR 文字识别."""
+    global _ocr_warned
     llm_cfg = getattr(config, "llm", None)
     if not llm_cfg or not llm_cfg.api_key:
+        if not _ocr_warned:
+            logger.warning("未配置 llm.api_key, 无法进行 OCR.")
+            _ocr_warned = True
         return None
-    model = llm_cfg.vision_model or llm_cfg.model or "gpt-4o-mini"
+
+    model = model or llm_cfg.vision_model or llm_cfg.model or "gpt-4o-mini"
 
     b64_image = base64.b64encode(photo_bytes).decode("utf-8")
 
@@ -110,7 +126,7 @@ async def ocr(photo_bytes: bytes) -> Optional[str]:
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "请识别图片中的所有文字, 只输出文字内容, 不要输出任何其他内容."},
+                {"type": "text", "text": prompt or GENERIC_OCR_PROMPT},
                 {
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"},
@@ -118,4 +134,4 @@ async def ocr(photo_bytes: bytes) -> Optional[str]:
             ],
         }
     ]
-    return await _chat_completion(messages, model=model, timeout=llm_cfg.timeout or 60)
+    return await _chat_completion(messages, model=model, timeout=timeout or llm_cfg.timeout or 60)

@@ -1,6 +1,5 @@
 import asyncio
 import random
-import string
 
 from pyrogram.types import Message
 
@@ -44,16 +43,14 @@ class MistyMonitor(Monitor):
                         msg = await wr("⚡️注册账号")
                         if "请输入验证码" in (msg.caption or msg.text):
                             data = await self.client.download_media(msg, in_memory=True)
-                            ocr = await OCRService.get()
+                            ocr = OCRService.get()
                             try:
-                                with ocr:
-                                    ocr_text = await ocr.run(data)
+                                self.captcha = await ocr.run(data, expected_len=5)
                             except Exception:
+                                self.captcha = ""
+                            if not self.captcha:
                                 self.log.info(f"机器人状态初始化失败, 正在重试.")
                                 continue
-                            self.captcha = ocr_text.translate(
-                                str.maketrans("", "", string.punctuation)
-                            ).replace(" ", "")
                             self.log.debug(f"接收到验证码: {self.captcha}")
                 except (asyncio.TimeoutError, TypeError):
                     continue

@@ -55,7 +55,7 @@ def _install_test_stubs():
 
     class OCRService:
         @staticmethod
-        async def get():
+        def get():
             raise RuntimeError("unused in this test")
 
     ocr_module.OCRService = OCRService
@@ -95,3 +95,61 @@ def test_local_link_still_rejects_capability_services_without_backend():
 
     assert local.supports_service("captcha") is False
     assert asyncio.run(local.auth("captcha")) is False
+
+
+def _make_ocr_service(result):
+    class FakeOCR:
+        async def run(self, photo_bytes):
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+    class FakeOCRService:
+        @classmethod
+        def get(cls):
+            return FakeOCR()
+
+    return FakeOCRService
+
+
+def test_local_link_ocr_uses_llm_result():
+    config_module.config.llm = SimpleNamespace(api_key="test")
+    local = LocalLink(make_client())
+    original = link_local_module.OCRService
+    link_local_module.OCRService = _make_ocr_service("AB12")
+    try:
+        assert asyncio.run(local.ocr(b"img")) == "AB12"
+    finally:
+        link_local_module.OCRService = original
+
+
+def test_local_link_ocr_falls_back_to_helper_when_llm_returns_empty():
+    config_module.config.llm = SimpleNamespace(api_key="test")
+    local = LocalLink(make_client())
+    original = link_local_module.OCRService
+    link_local_module.OCRService = _make_ocr_service("")
+
+    async def fake_helper(method, payload):
+        return {"answer": "HELP"}
+
+    local._run_helper = fake_helper
+    try:
+        assert asyncio.run(local.ocr(b"img")) == "HELP"
+    finally:
+        link_local_module.OCRService = original
+
+
+def test_local_link_ocr_falls_back_to_helper_when_llm_raises():
+    config_module.config.llm = SimpleNamespace(api_key="test")
+    local = LocalLink(make_client())
+    original = link_local_module.OCRService
+    link_local_module.OCRService = _make_ocr_service(RuntimeError("boom"))
+
+    async def fake_helper(method, payload):
+        return "HELP"
+
+    local._run_helper = fake_helper
+    try:
+        assert asyncio.run(local.ocr(b"img")) == "HELP"
+    finally:
+        link_local_module.OCRService = original

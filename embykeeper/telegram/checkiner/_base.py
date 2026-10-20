@@ -5,7 +5,6 @@ import re
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
 from enum import Flag, auto
-import string
 import time
 from typing import Iterable, List, Optional, Union
 
@@ -161,7 +160,7 @@ class BotCheckin(BaseBotCheckin):
     bot_checkin_caption_pat: str = None  # 当 Bot 返回图片时, 仅当符合该 regex 才识别为验证码, 置空不限制
     bot_text_ignore: Union[str, List[str]] = []  # 当含有列表中的关键词, 即忽略该消息, 置空不限制
     ocr: Optional[str] = None # OCR 模型, None = 默认模型, str = 自定义模型
-    bot_captcha_char_range: Optional[Union[CharRange, str]] = None # OCR 字符范围, 仅当默认模型可用, None = 默认范围, OCRRanges = 预定义范围, str = 自定义范围
+    bot_captcha_char_range: Optional[Union[CharRange, str]] = None # OCR 字符范围 (正则字符类, 如 "0-9" / "0-9A-Za-z"), None = 不限制
     bot_captcha_len: Union[int, Iterable[int]] = []  # 验证码长度的可能范围, 例如 [1, 2, 3], 置空不限制
     bot_success_pat: str = r"(\d+)[^\d]*(\d+)"  # 当接收到成功消息后, 从消息中提取数字的模式
     bot_retry_wait: int = 2  # 失败时等待的秒数
@@ -172,6 +171,7 @@ class BotCheckin(BaseBotCheckin):
     bot_account_fail_keywords: Union[str, List[str]] = []  # 账户错误将退出时检测的关键词 (暂不支持regex), 置空使用内置关键词表
     bot_too_many_tries_fail_keywords: Union[str, List[str]] = []  # 过多尝试将退出时检测的关键词 (暂不支持regex), 置空使用内置关键词表
     bot_fail_keywords: Union[str, List[str]] = []  # 签到错误将重试时检测的关键词 (暂不支持regex), 置空使用内置关键词表
+    bot_captcha_error_keywords: Union[str, List[str]] = []  # 验证码错误时检测的关键词, 命中后交由 on_captcha_error 处理, 置空不启用
     chat_name: str = None  # 在群聊中向机器人签到
     additional_auth: List[str] = []  # 额外认证要求
     max_retries = None  # 验证码错误或网络错误时最高重试次数 (默认无限)
@@ -524,37 +524,26 @@ class BotCheckin(BaseBotCheckin):
     async def on_photo(self, message: Message):
         """分析传入的验证码图片并返回验证码."""
         data = await self.client.download_media(message, in_memory=True)
-        ocr = await OCRService.get(
+        ocr = OCRService.get(
             ocr_name=self.ocr,
             char_range=self.bot_captcha_char_range,
         )
 
         try:
-            with ocr:
-                is_gif = getattr(data, "name", "").endswith(".gif")
-                ocr_text = await ocr.run(data, gif=is_gif)
-                if not ocr_text:
-                    self.log.info(f"签到失败: 接收到空验证码, 正在重试.")
-                    await self.retry()
-                    return
-
-                captcha = ocr_text.translate(str.maketrans("", "", string.punctuation)).replace(" ", "")
-
-            if captcha:
-                self.log.debug(f"[gray50]接收验证码: {captcha}.[/]")
-                if self.bot_captcha_len and len(captcha) not in to_iterable(self.bot_captcha_len):
-                    self.log.info(f"签到失败: 验证码低于设定长度, 正在重试.")
-                    await self.retry()
-                else:
-                    await asyncio.sleep(random.uniform(2, 4))
-                    await self.on_captcha(message, captcha)
-            else:
-                self.log.info(f"签到失败: 接收到空验证码, 正在重试.")
-                await self.retry()
+            captcha = await ocr.run(data, expected_len=self.bot_captcha_len)
         except Exception as e:
             self.log.info(f"签到失败: 验证码识别失败 ({e}), 正在重试.")
             await self.retry()
             return
+
+        if not captcha:
+            self.log.info(f"签到失败: 无法识别验证码, 正在重试.")
+            await self.retry()
+            return
+
+        self.log.debug(f"[gray50]接收验证码: {captcha}.[/]")
+        await asyncio.sleep(random.uniform(2, 4))
+        await self.on_captcha(message, captcha)
 
     async def on_captcha(self, message: Message, captcha: str):
         """
@@ -564,10 +553,22 @@ class BotCheckin(BaseBotCheckin):
         """
         await message.reply(captcha)
 
+    async def on_captcha_error(self, message: Message, text: str) -> bool:
+        """验证码错误时的回调, 返回 True 表示已处理, 不再执行默认的重试逻辑.
+
+        适用于机器人判错验证码后会补发新图的站点; 默认不处理.
+        """
+        return False
+
     async def on_text(self, message: Message, text: str):
         """接收非验证码消息时, 检测关键词并确认签到成功或失败, 发送用户提示."""
         if not text:
             return
+        if self.bot_captcha_error_keywords and any(
+            s in text for s in to_iterable(self.bot_captcha_error_keywords)
+        ):
+            if await self.on_captcha_error(message, text):
+                return
         if any(s in text for s in to_iterable(self.bot_text_ignore)):
             pass
         elif any(

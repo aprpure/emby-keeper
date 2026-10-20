@@ -10,6 +10,7 @@ from loguru import logger
 
 from embykeeper import llm
 from embykeeper.config import config
+from embykeeper.ocr import OCRService
 from embykeeper.utils import get_proxy_str
 
 
@@ -243,7 +244,11 @@ class LocalLink:
 
     async def ocr(self, photo_bytes: bytes) -> Optional[str]:
         if self.has_llm:
-            answer = await llm.ocr(photo_bytes)
+            try:
+                answer = await OCRService.get().run(photo_bytes)
+            except Exception as e:
+                self.log.debug(f"LLM OCR 识别失败: {e}")
+                answer = None
             if answer:
                 self.log.debug(f"LLM OCR 识别成功: {answer}")
                 return answer

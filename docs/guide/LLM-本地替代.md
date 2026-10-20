@@ -17,7 +17,7 @@
 | `gpt(prompt)` | 远端 `/gpt` | `llm.gpt()` 或 helper `gpt` |
 | `infer(prompt)` | 远端 `/infer` | 复用本地 `gpt` |
 | `visual(photo, options)` | 远端 `/visual` | `llm.visual()` 或 helper `visual` |
-| `ocr(photo)` | 远端 `/ocr` | 本地 `OCRService` -> `llm.ocr()` -> helper `ocr` |
+| `ocr(photo)` | 远端 `/ocr` | 本地 `OCRService` (验证码提示词 + 结果清洗) -> `llm.ocr()` -> helper `ocr` |
 | `terminus_answer(question)` | 远端 `/terminus_answer` | 本地 prompt 包装后调用 `gpt` 或 helper |
 | `pornemby_answer(question)` | 远端 `/pornemby_answer` | 本地 prompt 包装后调用 `gpt` 或 helper |
 | `captcha(site, url)` | 远端 `/captcha` | helper `captcha` |
