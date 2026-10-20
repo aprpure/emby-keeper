@@ -66,10 +66,31 @@ def _install_test_stubs():
     sys.modules["embykeeper.utils"] = utils_module
 
 
+_STUB_MODULES = [
+    "loguru",
+    "curl_cffi",
+    "curl_cffi.requests",
+    "embykeeper.llm",
+    "embykeeper.config",
+    "embykeeper.ocr",
+    "embykeeper.utils",
+]
+_original_modules = {name: sys.modules.get(name) for name in _STUB_MODULES}
+
 _install_test_stubs()
+sys.modules.pop("embykeeper.telegram.link_local", None)
 
 link_local_module = importlib.import_module("embykeeper.telegram.link_local")
 config_module = importlib.import_module("embykeeper.config")
+
+# 恢复被替换的模块并移除测试用模块, 避免污染后续测试模块的收集
+for _name in _STUB_MODULES:
+    _original = _original_modules.get(_name)
+    if _original is None:
+        sys.modules.pop(_name, None)
+    else:
+        sys.modules[_name] = _original
+sys.modules.pop("embykeeper.telegram.link_local", None)
 
 LocalLink = link_local_module.LocalLink
 

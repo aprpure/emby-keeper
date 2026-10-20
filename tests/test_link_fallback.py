@@ -4,6 +4,8 @@ import sys
 from types import SimpleNamespace
 import types
 
+import embykeeper.telegram  # 先导入包, 避免 stub 掉 embykeeper.utils 后包初始化失败
+
 
 def _install_test_stubs():
     tomli_module = types.ModuleType("tomli")
@@ -139,12 +141,39 @@ def _install_test_stubs():
     sys.modules["embykeeper.telegram.pyrogram"] = telegram_pyrogram_module
 
 
+_STUB_MODULES = [
+    "tomli",
+    "loguru",
+    "pyrogram",
+    "pyrogram.handlers",
+    "pyrogram.enums",
+    "pyrogram.types",
+    "pyrogram.errors",
+    "pyrogram.errors.exceptions.bad_request_400",
+    "embykeeper.utils",
+    "embykeeper.telegram.lock",
+    "embykeeper.telegram.link_local",
+    "embykeeper.telegram.pyrogram",
+]
+_original_modules = {name: sys.modules.get(name) for name in _STUB_MODULES}
+
 _install_test_stubs()
+sys.modules.pop("embykeeper.telegram.link", None)
 
 link_module = importlib.import_module("embykeeper.telegram.link")
+_link_local_module = importlib.import_module("embykeeper.telegram.link_local")
+
+# 恢复被替换的模块并移除测试用模块, 避免污染后续测试模块的收集
+for _name in _STUB_MODULES:
+    _original = _original_modules.get(_name)
+    if _original is None:
+        sys.modules.pop(_name, None)
+    else:
+        sys.modules[_name] = _original
+sys.modules.pop("embykeeper.telegram.link", None)
 
 Link = link_module.Link
-LocalLink = importlib.import_module("embykeeper.telegram.link_local").LocalLink
+LocalLink = _link_local_module.LocalLink
 
 
 def make_client(skip_auth=True):
