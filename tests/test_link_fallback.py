@@ -39,7 +39,9 @@ def _install_test_stubs():
         def __and__(self, other):
             return self
 
-    pyrogram_module.filters = SimpleNamespace(text=DummyFilter(), bot=DummyFilter(), user=lambda _: DummyFilter())
+    pyrogram_module.filters = SimpleNamespace(
+        text=DummyFilter(), bot=DummyFilter(), user=lambda _: DummyFilter()
+    )
     sys.modules["pyrogram"] = pyrogram_module
 
     handlers_module = types.ModuleType("pyrogram.handlers")
@@ -177,7 +179,9 @@ LocalLink = _link_local_module.LocalLink
 
 
 def make_client(skip_auth=True):
-    return SimpleNamespace(me=SimpleNamespace(id=1, full_name="tester"), _skip_auth=skip_auth, stop_handlers=[])
+    return SimpleNamespace(
+        me=SimpleNamespace(id=1, full_name="tester"), _skip_auth=skip_auth, stop_handlers=[]
+    )
 
 
 def test_wssocks_falls_back_to_remote_when_local_backend_returns_no_token():

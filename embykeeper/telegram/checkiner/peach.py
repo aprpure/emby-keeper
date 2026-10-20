@@ -42,9 +42,7 @@ class PeachCheckin(BotCheckin):
             except TimeoutError:
                 # pyrogram 的 click 超时只代表机器人没有在时限内回应 callback, 点击本身通常已送达;
                 # 继续点击会重复触发机器人 (可能连发验证码), 因此这里视为点击成功.
-                self.log.debug(
-                    f"点击签到按钮等待回调超时 ({i + 1}/{self.click_max_attempts}), 视为已点击."
-                )
+                self.log.debug(f"点击签到按钮等待回调超时 ({i + 1}/{self.click_max_attempts}), 视为已点击.")
                 return True
             except MessageIdInvalid:
                 self.log.debug("签到按钮已失效 (MessageIdInvalid).")

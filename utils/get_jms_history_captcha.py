@@ -50,9 +50,7 @@ async def label(config_file: Path, inp: Path = "captchas.txt"):
                 ocr_text = await OCRService.get().run(image_bytes)
                 if not ocr_text:
                     continue
-                await tg.send_photo(
-                    chat, photo, caption=f"`{ocr_text}`", parse_mode=ParseMode.MARKDOWN
-                )
+                await tg.send_photo(chat, photo, caption=f"`{ocr_text}`", parse_mode=ParseMode.MARKDOWN)
                 labelmsg = await tg.wait_reply(chat, timeout=None, outgoing=True)
                 if not len(labelmsg.text) == 4:
                     continue
